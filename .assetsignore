@@ -1,0 +1,10 @@
+worker/
+node_modules/
+.wrangler/
+.git/
+schema.sql
+wrangler.toml
+package.json
+package-lock.json
+LICENSE
+README.md

@@ -1,0 +1,14 @@
+{
+  "name": "interview-case-files",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "db:init": "wrangler d1 execute interview-case-files --local --file=./schema.sql",
+    "db:init:remote": "wrangler d1 execute interview-case-files --remote --file=./schema.sql",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

@@ -4,7 +4,7 @@
  * Case Files interview practice tracker.
  *
  * Structure:
- *   1. Storage layer   - persistence (localStorage), no DOM/UI knowledge
+ *   1. Storage layer   - persistence, no DOM/UI knowledge
  *   2. Rank logic       - pure functions, no side effects
  *   3. Render layer     - DOM writes only, reads state, no calculations
  *   4. Event wiring     - glues user actions to state + render
@@ -18,13 +18,27 @@
 /* 1. STORAGE LAYER                                            */
 /* ---------------------------------------------------------- */
 
+/**
+ * The log, and everything it takes to keep it.
+ *
+ * getLog() stays synchronous and always answers from localStorage, so
+ * the render layer never waits, never handles a loading state, and reads
+ * identically whether the detective is signed in or not. Cloudflare is a
+ * background concern hidden entirely inside this module: writes fire off
+ * a push and don't await it, and `refresh()` folds the server's copy back
+ * into the cache when it eventually arrives.
+ *
+ * Every entry carries a `uid`, which is what makes the merge safe — the
+ * server ignores uids it already holds, so pushing the whole history
+ * repeatedly costs nothing and duplicates nothing.
+ */
 const Storage = (() => {
   const KEY = "caseFiles.log.v1";
 
   function getLog() {
     try {
       const raw = localStorage.getItem(KEY);
-      return raw ? JSON.parse(raw) : [];
+      return raw ? JSON.parse(raw).map(withUid) : [];
     } catch (err) {
       console.error("Storage read failed:", err);
       return [];
@@ -33,20 +47,63 @@ const Storage = (() => {
 
   function saveEntry(entry) {
     const log = getLog();
-    log.push(entry);
-    try {
-      localStorage.setItem(KEY, JSON.stringify(log));
-    } catch (err) {
-      console.error("Storage write failed:", err);
-    }
+    log.push(withUid(entry));
+    write(log);
+    Api.pushLog(log).then(adopt);
     return log;
   }
 
   function clearLog() {
     localStorage.removeItem(KEY);
+    Api.clearLog();
   }
 
-  return { getLog, saveEntry, clearLog };
+  /**
+   * Reconcile with the server: push whatever is local, keep whatever
+   * comes back. Resolves to true when the cache actually changed, so
+   * the caller knows whether a re-render is worth doing.
+   */
+  async function refresh() {
+    const local = getLog();
+    const remote = await (local.length > 0 ? Api.pushLog(local) : Api.pullLog());
+    return adopt(remote);
+  }
+
+  /** Replace the cache with a server log. False when there's nothing to take. */
+  function adopt(remote) {
+    if (!remote) {
+      return false;
+    }
+    const before = localStorage.getItem(KEY);
+    const after = JSON.stringify(remote);
+    if (before === after) {
+      return false;
+    }
+    write(remote);
+    return true;
+  }
+
+  function write(log) {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(log));
+    } catch (err) {
+      console.error("Storage write failed:", err);
+    }
+  }
+
+  /** Backfills entries written before sync existed. */
+  function withUid(entry) {
+    if (entry.uid) {
+      return entry;
+    }
+    return {
+      ...entry,
+      uid: `${entry.caseId}-${entry.loggedAt || entry.date}-${Math.random().toString(36).slice(2, 10)}`,
+      loggedAt: entry.loggedAt || new Date().toISOString(),
+    };
+  }
+
+  return { getLog, saveEntry, clearLog, refresh };
 })();
 
 /* ---------------------------------------------------------- */
@@ -351,10 +408,13 @@ const ScoreModal = (() => {
     const raw = rawScore();
     const xp = raw + (bonus ? 5 : 0);
 
+    const now = new Date();
     const entry = {
+      uid: crypto.randomUUID(),
       caseId: activeCase.id,
       questionShort: activeCase.question.slice(0, 40) + (activeCase.question.length > 40 ? "…" : ""),
-      date: new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
+      date: now.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
+      loggedAt: now.toISOString(),
       rawScore: raw,
       bonus,
       xp,
@@ -396,12 +456,114 @@ const Views = (() => {
 })();
 
 /* ---------------------------------------------------------- */
-/* 6. BOOTSTRAP                                                 */
+/* 6. LOGIN                                                     */
+/* ---------------------------------------------------------- */
+
+/**
+ * The login modal and the nav badge that opens it.
+ *
+ * Signing in is never forced. `init()` only ever changes the label on a
+ * single nav button; if the detective ignores it forever the site keeps
+ * working from localStorage alone.
+ */
+const Login = (() => {
+  function init() {
+    document.getElementById("nav-identity").addEventListener("click", onIdentityClick);
+    document.getElementById("login-submit").addEventListener("click", submit);
+    document.getElementById("login-cancel").addEventListener("click", close);
+    document.getElementById("login-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submit();
+    });
+    document.getElementById("login-modal-backdrop").addEventListener("click", (e) => {
+      if (e.target.id === "login-modal-backdrop") close();
+    });
+
+    renderBadge();
+  }
+
+  /** Signed out opens the modal; signed in offers to sign out. */
+  function onIdentityClick() {
+    if (!Identity.isSignedIn()) {
+      open();
+      return;
+    }
+    if (confirm(`Sign out of ${Identity.username()}? Your progress stays on this device.`)) {
+      Identity.clear();
+      renderBadge();
+    }
+  }
+
+  function open() {
+    setError("");
+    const input = document.getElementById("login-input");
+    input.value = "";
+    document.getElementById("login-modal-backdrop").classList.add("open");
+    input.focus();
+  }
+
+  function close() {
+    document.getElementById("login-modal-backdrop").classList.remove("open");
+  }
+
+  async function submit() {
+    const button = document.getElementById("login-submit");
+    const name = document.getElementById("login-input").value.trim();
+
+    if (!name) {
+      setError("Every detective needs a name.");
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = "CHECKING…";
+
+    try {
+      await Api.signIn(name);
+      close();
+      renderBadge();
+      // The sign-in response already carried the server log; a refresh
+      // merges it with anything practised on this device beforehand.
+      if (await Storage.refresh()) {
+        Render.all();
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = "CONTINUE";
+    }
+  }
+
+  function setError(message) {
+    document.getElementById("login-error").textContent = message;
+  }
+
+  function renderBadge() {
+    const badge = document.getElementById("nav-identity");
+    const name = Identity.username();
+    badge.textContent = name || "Log In";
+    badge.classList.toggle("signed-in", Boolean(name));
+    badge.title = name ? "Synced to Cloudflare — click to sign out" : "Sync your progress across devices";
+  }
+
+  return { init, renderBadge };
+})();
+
+/* ---------------------------------------------------------- */
+/* 7. BOOTSTRAP                                                 */
 /* ---------------------------------------------------------- */
 
 function bootstrap() {
   Render.all();
   Views.init();
+  Login.init();
+
+  // Returning detectives sync silently — no modal, no spinner, no wait.
+  Storage.refresh().then((changed) => {
+    if (changed) Render.all();
+    // A refresh can drop an expired session, so the badge is re-read.
+    Login.renderBadge();
+  });
 
   document.getElementById("case-grid").addEventListener("click", (e) => {
     const card = e.target.closest(".case-card");

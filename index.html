@@ -19,6 +19,7 @@
       <button id="nav-cases" class="nav-link active">Case Files</button>
       <button id="nav-log" class="nav-link">XP Log</button>
       <button id="nav-about" class="nav-link">About</button>
+      <button id="nav-identity" class="nav-link identity-link">Log In</button>
     </nav>
   </header>
 
@@ -184,10 +185,36 @@
     </div>
   </div>
 
+  <!-- LOGIN MODAL -->
+  <div id="login-modal-backdrop" class="modal-backdrop">
+    <div class="modal login-modal">
+      <h3 class="login-title">Identify Yourself, <em>Detective</em></h3>
+      <p class="login-sub">Pick a codename to sync your case files across devices.</p>
+
+      <input
+        id="login-input"
+        class="login-input"
+        type="text"
+        maxlength="32"
+        autocomplete="username"
+        spellcheck="false"
+        placeholder="CODENAME"
+      />
+
+      <p class="login-error" id="login-error"></p>
+
+      <div class="login-actions">
+        <button id="login-cancel" class="pill-btn">CANCEL</button>
+        <button id="login-submit" class="pill-btn pill-btn-primary">CONTINUE</button>
+      </div>
+    </div>
+  </div>
+
   <footer class="site-footer">
     © 2026 Kheera's Case Method — Interview Case Files
   </footer>
 
+  <script src="assets/js/identity.js"></script>
   <script src="assets/js/questions.js"></script>
   <script src="assets/js/app.js"></script>
 </body>

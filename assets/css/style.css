@@ -957,3 +957,152 @@ main {
   .header-nav { gap: 4px; }
   .nav-link { padding: 7px 10px; font-size: 11px; }
 }
+
+/* ---------------- Login / Identity ---------------- */
+
+.identity-link {
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--text-faint);
+}
+
+.identity-link:hover {
+  border-color: var(--border-glow);
+  color: var(--accent-soft);
+}
+
+.identity-link.signed-in {
+  color: var(--accent-soft);
+  border-color: var(--border-glow);
+  background: var(--accent-dim);
+  box-shadow: 0 0 14px rgba(125, 211, 252, 0.25);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Inherits the site glass recipe from .modal — this only sizes it down
+   and centres the contents, so the two modals stay visually related. */
+.login-modal {
+  max-width: 440px;
+  padding: 36px 32px 30px;
+  text-align: center;
+}
+
+.login-title {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 500;
+  margin: 0 0 10px;
+  color: var(--text-primary);
+  text-shadow: 0 0 18px rgba(165, 230, 255, 0.35);
+}
+
+.login-title em {
+  font-style: italic;
+  color: var(--accent-soft);
+}
+
+.login-sub {
+  margin: 0 0 24px;
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.login-input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(165, 230, 255, 0.22);
+  border-radius: 14px;
+  padding: 16px 18px;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  letter-spacing: 2px;
+  text-align: center;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.login-input::placeholder {
+  color: var(--text-faint);
+  letter-spacing: 3px;
+}
+
+.login-input:focus {
+  border-color: rgba(200, 245, 255, 0.6);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow:
+    0 0 20px rgba(125, 211, 252, 0.3),
+    inset 0 0 12px rgba(255, 255, 255, 0.06);
+}
+
+.login-error {
+  min-height: 18px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  color: var(--danger);
+}
+
+.login-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.pill-btn {
+  flex: 1;
+  max-width: 180px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  padding: 14px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pill-btn:hover {
+  border-color: var(--border-glow);
+  color: var(--text-primary);
+}
+
+.pill-btn-primary {
+  background: linear-gradient(90deg, rgba(125, 211, 252, 0.35), rgba(165, 230, 255, 0.45));
+  border-color: rgba(200, 245, 255, 0.6);
+  color: #eaf9ff;
+  box-shadow:
+    0 0 18px rgba(125, 211, 252, 0.5),
+    inset 0 0 12px rgba(255, 255, 255, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  text-shadow: 0 0 10px rgba(200, 245, 255, 0.6);
+}
+
+.pill-btn-primary:hover {
+  background: linear-gradient(90deg, rgba(125, 211, 252, 0.5), rgba(165, 230, 255, 0.6));
+  color: #ffffff;
+  box-shadow:
+    0 0 28px rgba(125, 211, 252, 0.75),
+    inset 0 0 16px rgba(255, 255, 255, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+.pill-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
+}
+
+@media (max-width: 800px) {
+  .login-modal { padding: 28px 22px 24px; }
+  .login-title { font-size: 22px; }
+  .identity-link.signed-in { max-width: 90px; }
+}

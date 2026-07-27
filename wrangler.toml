@@ -1,0 +1,14 @@
+name = "interview-case-files"
+main = "worker/index.js"
+compatibility_date = "2026-07-27"
+
+# Static site lives at the repo root. `.assetsignore` keeps the server-side
+# files (worker/, schema.sql, config) out of what gets served publicly.
+[assets]
+directory = "."
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "interview-case-files"
+database_id = "PLACEHOLDER_REPLACE_AFTER_D1_CREATE"
