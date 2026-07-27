@@ -2,13 +2,19 @@ name = "interview-case-files"
 main = "worker/index.js"
 compatibility_date = "2026-07-27"
 
-# Static site lives at the repo root. `.assetsignore` keeps the server-side
-# files (worker/, schema.sql, config) out of what gets served publicly.
+# public/ holds the served site and nothing else.
+#
+# This must NOT point at the repo root. `wrangler dev` watches the assets
+# directory recursively and does not honour `.assetsignore` (or accept any
+# ignore list), so a root-level directory puts .wrangler/ inside the watched
+# tree — local D1 writes on every request, which retriggers the reload, which
+# serves another request. Giving the assets their own directory means the
+# watcher only ever sees files a human edits.
 [assets]
-directory = "."
+directory = "./public"
 binding = "ASSETS"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "interview-case-files"
-database_id = "PLACEHOLDER_REPLACE_AFTER_D1_CREATE"
+database_id = "YOUR_D1_DATABASE_ID_HERE"

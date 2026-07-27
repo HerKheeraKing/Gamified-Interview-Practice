@@ -7,12 +7,16 @@ questions now, technical questions added in future rounds.
 
 ```
 .
-├── index.html              # single-page app shell
-├── assets/
-│   ├── css/style.css       # design tokens + all styling
-│   ├── js/questions.js     # question bank + rank data (content, no logic)
-│   ├── js/app.js           # storage / rank logic / render / event wiring
-│   └── images/detective.png
+├── public/                 # the served site — and nothing else
+│   ├── index.html          # single-page app shell
+│   └── assets/
+│       ├── css/style.css   # design tokens + all styling
+│       ├── js/questions.js # question bank + rank data (content, no logic)
+│       ├── js/identity.js  # saved username + the only fetch() calls
+│       ├── js/app.js       # storage / rank logic / render / event wiring
+│       └── images/detective.png
+├── worker/index.js         # Cloudflare Worker: the sync API
+├── schema.sql              # D1 tables
 └── README.md
 ```
 
@@ -30,7 +34,7 @@ questions now, technical questions added in future rounds.
 
 ## Adding new questions
 
-Open `assets/js/questions.js` and append to `CASE_FILES`:
+Open `public/assets/js/questions.js` and append to `CASE_FILES`:
 
 ```js
 { id: 13, category: CASE_CATEGORIES.TECHNICAL, question: "..." },
@@ -40,8 +44,8 @@ IDs must stay unique and sequential.
 
 ## Deploy
 
-Static site — point Cloudflare Pages/Workers at this folder, `index.html`
-as the entry point. No env vars, no build command needed.
+`wrangler deploy` ships the Worker and everything in `public/` in one go.
+No build step. See "Login & cross-device sync" below for D1 setup.
 
 ## Login & cross-device sync
 
@@ -50,9 +54,9 @@ everything lives in `localStorage`. Signing in adds a Cloudflare D1
 mirror so the same case log follows you between devices.
 
 ```
-worker/index.js       # API: /api/session, /api/log (GET/POST/DELETE)
-schema.sql            # D1 tables: detectives, sessions, case_log
-assets/js/identity.js # client: saved username + the only fetch() calls
+worker/index.js              # API: /api/session, /api/log (GET/POST/DELETE)
+schema.sql                   # D1 tables: detectives, sessions, case_log
+public/assets/js/identity.js # client: saved username + the only fetch() calls
 ```
 
 `Storage` in `app.js` stays synchronous and always answers from
@@ -89,5 +93,12 @@ npm run dev              # wrangler dev — Worker + local D1 + static assets
 npm run deploy
 ```
 
-`.assetsignore` keeps `worker/`, `schema.sql` and config out of what
-gets served publicly.
+### Why the site lives in `public/`
+
+`[assets] directory` must point at `public/`, never at the repo root.
+`wrangler dev` watches that directory recursively and offers no way to
+exclude anything — not `.assetsignore`, not a config flag. Pointed at the
+root, it watches `.wrangler/`, which local D1 writes to on every request,
+so each request triggers a reload that serves another request. Keeping
+the served files in their own directory means the watcher only ever sees
+files a human edits, and nothing needs an exclusion list.
