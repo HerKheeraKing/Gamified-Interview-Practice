@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>The Interview Case Files</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%231a1830'/%3E%3Ccircle cx='32' cy='32' r='13' fill='%23ffffff' opacity='0.95'/%3E%3Ccircle cx='32' cy='32' r='13' fill='%23f7c6e0' opacity='0.55'/%3E%3Ccircle cx='32' cy='32' r='6' fill='%23ffffff'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="assets/css/style.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <div class="bg-glow"></div>
+
+  <header class="site-header">
+    <div class="brand">KHEERA'S CASE METHOD</div>
+    <nav class="header-nav">
+      <button id="nav-cases" class="nav-link active">Case Files</button>
+      <button id="nav-log" class="nav-link">XP Log</button>
+      <button id="nav-about" class="nav-link">About</button>
+    </nav>
+  </header>
+
+  <main>
+
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero-text">
+        <p class="kicker">A FIELD MANUAL FOR CRACKING THE TECH INTERVIEW</p>
+        <h1>The Interview <em>Case Files</em></h1>
+        <p class="hero-sub">
+          Every interview is a case. Every question is a lead.
+          Work it like a detective — build the narrative, land the close.
+        </p>
+
+        <div class="rank-card" id="rank-card">
+          <div class="rank-row">
+            <div class="rank-icon" id="rank-icon"><img src="assets/images/XP_Icon.png" alt="Rank" /></div>
+            <div class="rank-info">
+              <div class="rank-title" id="rank-title">Rookie Detective</div>
+              <div class="rank-sub"><span id="xp-total">0</span> XP</div>
+            </div>
+            <div class="rank-level" id="rank-level">LVL 1</div>
+          </div>
+          <div class="xp-bar-track">
+            <div class="xp-bar-fill" id="xp-bar-fill"></div>
+          </div>
+          <div class="xp-bar-labels">
+            <span id="xp-current-label">0 XP</span>
+            <span id="xp-next-label">50 XP to next rank</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-character">
+        <div class="hero-character-frame">
+          <img src="assets/images/detective.png" alt="Detective character" />
+        </div>
+      </div>
+    </section>
+
+    <!-- CASE FILES VIEW -->
+    <section id="view-cases" class="view active">
+
+      <div class="section-heading">
+        <h2>Open Cases <span class="heart">♡</span></h2>
+        <p id="round-subtitle">Behavioral — Round 1</p>
+      </div>
+
+      <div class="round-carousel">
+        <div class="round-track" id="round-track"></div>
+        <div class="round-dots" id="round-dots"></div>
+      </div>
+
+      <div class="case-grid" id="case-grid"></div>
+
+    </section>
+
+    <!-- XP LOG VIEW -->
+    <section id="view-log" class="view">
+      <div class="section-heading">
+        <h2>XP Log</h2>
+        <p>Every closed case, tracked</p>
+      </div>
+
+      <div class="log-table-wrap">
+        <div class="log-table-scroll">
+          <table class="log-table" id="log-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Case</th>
+                <th>Score</th>
+                <th>XP</th>
+              </tr>
+            </thead>
+            <tbody id="log-tbody">
+              <tr class="log-empty-row">
+                <td colspan="4">No cases logged yet. Go crack one open.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <button id="reset-btn" class="ghost-btn danger">Reset All Progress</button>
+    </section>
+
+    <!-- ABOUT VIEW -->
+    <section id="view-about" class="view">
+      <div class="section-heading">
+        <h2>Detective's Notes</h2>
+        <p>How a case session works</p>
+      </div>
+
+      <div class="notes-steps">
+        <div class="note-step">
+          <div class="note-step-num">1</div>
+          <div class="note-step-body">
+            <h3>Pick a case</h3>
+            <p>Open any question below — or let one find you at random.</p>
+          </div>
+        </div>
+        <div class="note-step">
+          <div class="note-step-num">2</div>
+          <div class="note-step-body">
+            <h3>Speak it out loud</h3>
+            <p>Answer verbally first. Reading off a script doesn't build interview muscle — talking does.</p>
+          </div>
+        </div>
+        <div class="note-step">
+          <div class="note-step-num">3</div>
+          <div class="note-step-body">
+            <h3>Score it</h3>
+            <p>Rate yourself honestly across five categories. This is practice, not a performance review.</p>
+          </div>
+        </div>
+        <div class="note-step">
+          <div class="note-step-num">4</div>
+          <div class="note-step-body">
+            <h3>Close the case</h3>
+            <p>XP logs automatically. Watch your rank climb over the weeks, not the day.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="scorecard-explainer">
+        <h3>The Scorecard</h3>
+        <p>Each answer is scored 1–5 across five categories (25 pts possible), plus a +5 bonus for naming a real project with specifics.</p>
+        <ul>
+          <li><strong>Structure</strong> — Clear frame (Situation → Task → Action → Result), not a ramble.</li>
+          <li><strong>Relevance</strong> — Actually answers the question asked.</li>
+          <li><strong>Clarity & Delivery</strong> — Concise, confident, minimal filler.</li>
+          <li><strong>Evidence</strong> — Specific details: tools, numbers, outcomes.</li>
+          <li><strong>Impact / Close</strong> — Lands the point instead of trailing off.</li>
+        </ul>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- CASE MODAL -->
+  <div id="case-modal-backdrop" class="modal-backdrop">
+    <div class="modal">
+      <button class="modal-close" id="modal-close">&times;</button>
+      <div class="modal-scroll">
+        <p class="modal-kicker" id="modal-case-num">CASE FILE</p>
+        <h3 class="modal-question" id="modal-question"></h3>
+
+        <div class="score-fields" id="score-fields"></div>
+
+        <label class="bonus-check">
+          <input type="checkbox" id="bonus-check" />
+          Named a real project with specifics (+5 XP bonus)
+        </label>
+
+        <div class="modal-total">
+          Total this case: <span id="modal-total-xp">0</span> XP
+        </div>
+
+        <button class="primary-btn" id="submit-score">Close the Case</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    © 2026 Kheera's Case Method — Interview Case Files
+  </footer>
+
+  <script src="assets/js/questions.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
