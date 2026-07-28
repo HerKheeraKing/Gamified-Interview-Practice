@@ -38,11 +38,39 @@
  * repeatedly costs nothing and duplicates nothing.
  */
 const Storage = (() => {
-  const KEY = "caseFiles.log.v1";
+  /**
+   * One cache slot per identity.
+   *
+   * There used to be a single shared key. Signing in pulled an account's
+   * whole history into it, and signing out cleared the identity but not
+   * the cache — so the XP Log went on showing the previous detective's
+   * entries, now under nobody's name at all. Clearing the cache on sign
+   * out would have fixed the symptom and thrown away the device's own
+   * history to do it.
+   *
+   * Keying by username means sign out has nothing to clear. It changes
+   * which slot is being read, and the device's log is still sitting
+   * where it always was. Switching accounts on a shared iPad falls out
+   * of the same change for free.
+   *
+   * The unsuffixed key is the signed-out device log, and is also the
+   * pre-sync format — anyone who practised before accounts existed finds
+   * their history exactly where they left it.
+   */
+  const DEVICE_KEY = "caseFiles.log.v1";
+
+  function currentKey() {
+    const name = Identity.username();
+    return name ? `${DEVICE_KEY}:${name}` : DEVICE_KEY;
+  }
 
   function getLog() {
+    return readKey(currentKey());
+  }
+
+  function readKey(key) {
     try {
-      const raw = localStorage.getItem(KEY);
+      const raw = localStorage.getItem(key);
       return raw ? JSON.parse(raw).map(withUid) : [];
     } catch (err) {
       console.error("Storage read failed:", err);
@@ -59,7 +87,7 @@ const Storage = (() => {
   }
 
   function clearLog() {
-    localStorage.removeItem(KEY);
+    localStorage.removeItem(currentKey());
     Api.clearLog();
   }
 
@@ -69,9 +97,37 @@ const Storage = (() => {
    * the caller knows whether a re-render is worth doing.
    */
   async function refresh() {
-    const local = getLog();
-    const remote = await (local.length > 0 ? Api.pushLog(local) : Api.pullLog());
+    const pending = pendingUpload();
+    const remote = await (pending.length > 0 ? Api.pushLog(pending) : Api.pullLog());
     return adopt(remote);
+  }
+
+  /**
+   * Everything this device can contribute to the signed-in account: its
+   * own slot, plus anything practised before signing in.
+   *
+   * The second half is what stops work done anonymously from being
+   * stranded the moment an account slot exists to read instead. The
+   * server dedupes on uid, so re-offering a device log it has already
+   * absorbed costs one redundant push and changes nothing.
+   */
+  function pendingUpload() {
+    const mine = getLog();
+    if (currentKey() === DEVICE_KEY) {
+      return mine;
+    }
+    return dedupe([...mine, ...readKey(DEVICE_KEY)]);
+  }
+
+  function dedupe(entries) {
+    const seen = new Set();
+    return entries.filter((entry) => {
+      if (seen.has(entry.uid)) {
+        return false;
+      }
+      seen.add(entry.uid);
+      return true;
+    });
   }
 
   /** Replace the cache with a server log. False when there's nothing to take. */
@@ -79,7 +135,7 @@ const Storage = (() => {
     if (!remote) {
       return false;
     }
-    const before = localStorage.getItem(KEY);
+    const before = localStorage.getItem(currentKey());
     const after = JSON.stringify(remote);
     if (before === after) {
       return false;
@@ -90,7 +146,7 @@ const Storage = (() => {
 
   function write(log) {
     try {
-      localStorage.setItem(KEY, JSON.stringify(log));
+      localStorage.setItem(currentKey(), JSON.stringify(log));
     } catch (err) {
       console.error("Storage write failed:", err);
     }
@@ -1399,9 +1455,15 @@ const Login = (() => {
       open();
       return;
     }
-    if (confirm(`Sign out of ${Identity.username()}? Your progress stays on this device.`)) {
+    if (confirm(`Sign out of ${Identity.username()}? That log stays synced to the account — this device goes back to its own.`)) {
       Identity.clear();
       renderBadge();
+      // The badge is not the only thing that just changed meaning. Every
+      // panel on the page — rank, XP bar, per-case scores, the log table
+      // — is drawn from Storage.getLog(), and getLog() now answers from a
+      // different slot than it did a line ago. Redrawing only the badge
+      // is what left the previous detective's entries on screen.
+      Render.all();
     }
   }
 
