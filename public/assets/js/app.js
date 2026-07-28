@@ -602,7 +602,7 @@ const Practice = (() => {
     // typing and then refuses to send it.
     document.getElementById("practice-composer").hidden = mode === "handoff" || Boolean(blocked);
 
-    note(openingNote());
+    showOpeningNote();
 
     // Asking the log whether it's empty rather than the transcript:
     // leaving text mode and coming back re-runs this, and the transcript
@@ -674,25 +674,31 @@ const Practice = (() => {
   }
 
   /**
-   * What to warn about before the detective starts talking to a wall.
+   * Put the right note on screen for the mode that was just opened.
+   *
    * Access first, because a browser with no speech engine is a smaller
-   * problem than not being allowed to use the mode at all.
+   * problem than not being allowed to use the mode at all. If none of
+   * the problems apply, the line is the remaining budget — which is not
+   * a problem, and says so by not being dressed as one.
    */
-  function openingNote() {
+  function showOpeningNote() {
     if (mode === "handoff") {
-      return "";
+      note("");
+      return;
     }
 
     const blocked = aiBlocked();
     if (blocked) {
-      return blocked;
+      note(blocked, "warn");
+      return;
     }
 
     if (mode === "voice" && !Voice.supported()) {
-      return "This browser has no speech engine. Chrome or Edge will do it; Text Practice works anywhere.";
+      note("This browser has no speech engine. Chrome or Edge will do it; Text Practice works anywhere.", "warn");
+      return;
     }
 
-    return budgetNote();
+    note(budgetNote(), "info");
   }
 
   /**
@@ -707,17 +713,27 @@ const Practice = (() => {
     if (access.tier !== "invited") {
       return "";
     }
-    return `Invite code: $${money(access.remaining)} of $${money(access.cap)} of AI coaching left.`;
+    return `AI coaching: $${money(access.remaining)} of $${money(access.cap)} left on your invite code.`;
   }
 
   function money(usd) {
     return Number(usd || 0).toFixed(2);
   }
 
-  function note(message) {
+  /**
+   * The one line above the practice panel.
+   *
+   * `tone` decides whether it looks like a problem. The note started out
+   * carrying only refusals, so it was styled in the danger colour
+   * outright — which meant a healthy budget was announced in alarm pink,
+   * reading as a failure at a glance. Warnings keep the pink; a running
+   * total is just information and is dressed as such.
+   */
+  function note(message, tone = "warn") {
     const element = document.getElementById("practice-note");
     element.textContent = message;
     element.hidden = !message;
+    element.classList.toggle("note-info", tone === "info");
   }
 
   /* ---- composer: one message, one surface ---- */
@@ -902,7 +918,14 @@ const Practice = (() => {
         input.value = "";
         refreshComposer();
       } else {
-        note(openingNote() || "Live Voice needs a browser with a speech engine — try Chrome or Edge.");
+        // Voice declined a typed aside, which only happens when there
+        // is no conversation to add it to. If access explains why, say
+        // that; otherwise it is the missing speech engine.
+        if (aiBlocked() || !Voice.supported()) {
+          showOpeningNote();
+        } else {
+          note("Live Voice needs a browser with a speech engine — try Chrome or Edge.", "warn");
+        }
       }
       return;
     }
@@ -1007,7 +1030,7 @@ const Practice = (() => {
     Api.refreshAccess().then(() => {
       markModes();
       if (mode === "text" || mode === "voice") {
-        note(openingNote());
+        showOpeningNote();
       }
     });
   }
@@ -1027,7 +1050,7 @@ const Practice = (() => {
     // so the access check belongs here and not only at mode selection —
     // a cap can be reached mid-session, between one turn and the next.
     if (aiBlocked() || !Voice.supported()) {
-      note(openingNote());
+      showOpeningNote();
       return;
     }
 
@@ -1072,7 +1095,11 @@ const Practice = (() => {
       document.getElementById("orb-state").textContent = label;
     }
     if (caption !== null && caption !== undefined) {
-      document.getElementById("orb-caption").textContent = caption;
+      // Whitespace-only counts as nothing. The caption collapses when
+      // it's empty (see .orb-caption:empty), and a lone space from a
+      // speech engine still filling in would hold the gap open while
+      // showing nothing — the exact thing that rule exists to prevent.
+      document.getElementById("orb-caption").textContent = caption.trim() ? caption : "";
     }
   }
 

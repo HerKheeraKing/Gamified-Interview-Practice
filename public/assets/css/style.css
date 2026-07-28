@@ -1599,6 +1599,25 @@ main {
 
 .practice-note[hidden] { display: none; }
 
+/* The same box, not shouting.
+ *
+ * Everything above is tuned for a refusal — pink border, pink bloom,
+ * danger text. The running budget uses the same slot and is not a
+ * refusal, and rendering "$0.50 of $0.50 left" in alarm pink made a
+ * full tank look like a fault. Neutral until there is something wrong. */
+.practice-note.note-info {
+  border-color: rgba(165, 230, 255, 0.22);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.026) 0%, rgba(255,255,255,0.012) 45%, rgba(125,211,252,0.05) 100%),
+    rgba(40, 44, 60, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    inset 0 -12px 24px rgba(125, 211, 252, 0.05),
+    0 0 20px rgba(125, 211, 252, 0.10),
+    0 3px 14px rgba(0, 0, 0, 0.20);
+  color: var(--text-muted);
+}
+
 /* ---------------- Text practice ---------------- */
 
 .chat-log {
@@ -2242,6 +2261,23 @@ main {
    The margins are breathing room on both sides. The caption sits
    between the state label and the controls and was close enough to
    both to look like one crowded block. */
+/* Nothing to caption, nothing to reserve.
+ *
+ * The margin, padding and min-height below add up to 86px of held-open
+ * space, which is right once there are words in it — the caption grows
+ * upward from the bottom, and a box that resized on every interim
+ * transcript would make the whole panel jitter while someone is talking.
+ * Held open *before* the first word it is just a hole between MIC CLOSED
+ * and the button under it.
+ *
+ * `:empty` rather than a class toggle so the two states can't disagree:
+ * the element carries the caption, so the element already knows whether
+ * there is one. setOrb normalises whitespace-only captions to "" so this
+ * can't be defeated by a stray space. */
+.orb-caption:empty {
+  display: none;
+}
+
 .orb-caption {
   margin: 20px 0 0;
   padding-top: 16px;
