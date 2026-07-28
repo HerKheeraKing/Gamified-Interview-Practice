@@ -1,0 +1,34 @@
+# ============================================================
+# Line endings — one answer for the whole repo.
+#
+# Without this file, whichever editor or tool touched a file last
+# decided its line endings, and a Windows checkout could rewrite every
+# text file to CRLF. Git then reported the entire repo as modified:
+# 4,300 changed lines across 11 files with not one character of real
+# content different. Real changes became impossible to see, and any
+# commit made in that state buried a one-line fix under a whole-file
+# diff.
+#
+# `text=auto` tells Git to normalise text files to LF in the object
+# store; `eol=lf` tells it to check them back out as LF too, on every
+# platform. The second half is the part that matters here — normalising
+# only the stored copy still leaves CRLF on disk, which is exactly the
+# state that produced the churn.
+#
+# This is safe on Windows: every tool in this project's path (VS Code,
+# Node, wrangler, PowerShell 7+) reads LF without complaint.
+# ============================================================
+
+* text=auto eol=lf
+
+# Marked explicitly rather than relying on content sniffing. A binary
+# file that Git mistakes for text gets "normalised" — that is, corrupted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
