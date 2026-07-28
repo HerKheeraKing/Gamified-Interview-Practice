@@ -551,8 +551,16 @@ const Practice = (() => {
 
     note(openingNote());
 
-    if (mode === "text" && transcript.length === 0) {
-      say("assistant", "Whenever you're ready — answer the question above and I'll score it.");
+    // Asking the log whether it's empty rather than the transcript:
+    // leaving text mode and coming back re-runs this, and the transcript
+    // being empty doesn't mean the hint isn't already on screen. Only
+    // `reset` clears the log, so this seeds exactly once per case.
+    //
+    // "hint", not "assistant" — it's an instruction to the room, not a
+    // turn in the conversation, so it centres instead of sitting in a
+    // bubble on Claude's side.
+    if (mode === "text" && !document.getElementById("chat-log").hasChildNodes()) {
+      say("hint", "Whenever you're ready — answer the question above and I'll score it.");
     }
   }
 

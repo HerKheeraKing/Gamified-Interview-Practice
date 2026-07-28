@@ -1175,14 +1175,14 @@ main {
 
 .practice-panel {
   margin-top: 14px;
-  padding: 16px;
+  padding: 20px 18px;
   border: 1px solid rgba(165, 230, 255, 0.16);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.025);
 }
 
 .practice-note {
-  margin: 0 0 12px;
+  margin: 0 0 16px;
   font-size: 12px;
   line-height: 1.5;
   color: var(--danger);
@@ -1213,6 +1213,7 @@ main {
 
 .chat-row { display: flex; }
 .chat-row.chat-user { justify-content: flex-end; }
+.chat-row.chat-hint { justify-content: center; }
 
 .chat-bubble {
   margin: 0;
@@ -1243,15 +1244,25 @@ main {
   color: var(--danger);
 }
 
-/* ---------------- Composer (text + voice share it) ---------------- */
-
-.practice-composer {
-  display: flex;
-  gap: 8px;
-  margin-top: 14px;
+/* Not a turn in the conversation — an instruction to the room. No
+   bubble, no side, no tail. */
+.chat-hint .chat-bubble {
+  max-width: 100%;
+  padding: 6px 4px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-faint);
 }
 
+/* ---------------- Composer (text + voice share it) ---------------- */
+
 .practice-composer[hidden] { display: none; }
+
+.practice-composer:not([hidden]) {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
 
 .practice-input {
   flex: 1;
@@ -1297,14 +1308,25 @@ main {
 
 /* ---------------- Live voice: the orb ---------------- */
 
+/* Every stage lays itself out with `#id:not([hidden])`, never a bare
+   `#id`. An id selector outweighs `.practice-stage[hidden]`, so a bare
+   `#stage-voice { display: flex }` wins against the rule meant to hide
+   it and the orb and the Send to Claude button leak into Text Practice.
+   Folding :not([hidden]) into the layout rule means the two can't
+   disagree — there is no cascade to lose. */
 .practice-stage[hidden] { display: none; }
 
-#stage-voice {
+/* Spacing here is set per child rather than by one `gap`, because the
+   four elements are not equally related: the state label belongs to the
+   orb, the caption belongs to the label, and the toggle is a separate
+   control that needs air around it. A single gap makes all three
+   distances equal and the whole column reads as one bunched block. */
+#stage-voice:not([hidden]) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 6px 0 2px;
+  gap: 0;
+  padding: 12px 0 4px;
 }
 
 /* Three stacked layers, because one element can't glow outward,
@@ -1398,7 +1420,7 @@ main {
 }
 
 .orb-state {
-  margin: 0;
+  margin: 18px 0 0;
   font-size: 11px;
   letter-spacing: 2px;
   text-transform: uppercase;
@@ -1406,7 +1428,7 @@ main {
 }
 
 .orb-caption {
-  margin: 0;
+  margin: 10px 0 0;
   min-height: 34px;
   max-height: 88px;
   overflow-y: auto;
@@ -1416,13 +1438,17 @@ main {
   color: var(--text-muted);
 }
 
+#voice-toggle {
+  margin-top: 18px;
+}
+
 /* ---------------- Send to Claude ---------------- */
 
-#stage-handoff {
+#stage-handoff:not([hidden]) {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 12px;
+  gap: 14px;
 }
 
 .handoff-copy {
