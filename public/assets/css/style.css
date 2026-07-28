@@ -64,7 +64,6 @@
   .modal-scroll,
   .chat-log,
   .preview-body,
-  .orb-caption,
   .mic-list {
     scrollbar-width: thin;
     scrollbar-color: rgba(200, 245, 255, 0.4) rgba(255, 255, 255, 0.04);
@@ -77,7 +76,6 @@ body::-webkit-scrollbar,
 .modal-scroll::-webkit-scrollbar,
 .chat-log::-webkit-scrollbar,
 .preview-body::-webkit-scrollbar,
-.orb-caption::-webkit-scrollbar,
 .mic-list::-webkit-scrollbar {
   width: 8px;
 }
@@ -88,7 +86,6 @@ body::-webkit-scrollbar-thumb,
 .modal-scroll::-webkit-scrollbar-thumb,
 .chat-log::-webkit-scrollbar-thumb,
 .preview-body::-webkit-scrollbar-thumb,
-.orb-caption::-webkit-scrollbar-thumb,
 .mic-list::-webkit-scrollbar-thumb {
   background: rgba(200, 245, 255, 0.4);
   border-radius: 999px;
@@ -106,7 +103,6 @@ body::-webkit-scrollbar-thumb:hover,
 .modal-scroll::-webkit-scrollbar-thumb:hover,
 .chat-log::-webkit-scrollbar-thumb:hover,
 .preview-body::-webkit-scrollbar-thumb:hover,
-.orb-caption::-webkit-scrollbar-thumb:hover,
 .mic-list::-webkit-scrollbar-thumb:hover {
   background: rgba(220, 250, 255, 0.55);
   box-shadow:
@@ -122,7 +118,6 @@ body::-webkit-scrollbar-track,
 .modal-scroll::-webkit-scrollbar-track,
 .chat-log::-webkit-scrollbar-track,
 .preview-body::-webkit-scrollbar-track,
-.orb-caption::-webkit-scrollbar-track,
 .mic-list::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.04);
   border-radius: 999px;
@@ -1826,10 +1821,29 @@ main {
 .orb[data-state="thinking"] .orb-halo { opacity: 0.5; }
 .orb[data-state="thinking"] .orb-core { animation: orb-spin 1.5s linear infinite; }
 
-/* Speaking: fast, bright, unmistakably its turn. */
-.orb[data-state="speaking"] .orb-halo { opacity: 1; animation: orb-swell 0.85s ease-in-out infinite; }
-.orb[data-state="speaking"] .orb-core { animation: orb-talk 0.62s ease-in-out infinite; }
-.orb[data-state="speaking"] .orb-glass { border-color: rgba(220, 250, 255, 0.75); }
+/* Speaking: fast, bright, unmistakably its turn — and recoloured. Cyan
+   on this orb means "listening to you"; when Claude is the one talking
+   it switches to the same pastel green as the mic-active state, so the
+   colour itself (not just the label word) says who has the floor. */
+.orb[data-state="speaking"] .orb-halo {
+  opacity: 1;
+  animation: orb-swell 0.85s ease-in-out infinite;
+  background: radial-gradient(circle at 50% 50%, rgba(167, 243, 208, 0.45) 0%, rgba(167, 243, 208, 0) 68%);
+}
+.orb[data-state="speaking"] .orb-core {
+  animation: orb-talk 0.62s ease-in-out infinite;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.95) 0%, rgba(182, 245, 205, 0.75) 42%, rgba(167, 243, 208, 0) 74%);
+}
+.orb[data-state="speaking"] .orb-glass {
+  background:
+    radial-gradient(circle at 33% 27%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.06) 26%, rgba(255, 255, 255, 0) 46%),
+    radial-gradient(circle at 50% 50%, rgba(167, 243, 208, 0.2) 0%, rgba(23, 21, 43, 0.32) 72%);
+  border-color: rgba(182, 245, 205, 0.75);
+  box-shadow:
+    inset 0 2px 14px rgba(255, 255, 255, 0.22),
+    inset 0 -10px 22px rgba(167, 243, 208, 0.28),
+    0 0 30px rgba(167, 243, 208, 0.4);
+}
 
 @keyframes orb-breathe {
   0%, 100% { opacity: 0.5; transform: scale(0.94); }
@@ -1857,23 +1871,45 @@ main {
   .orb span { animation: none !important; }
 }
 
+/* Mirrors the orb's own data-state rather than nesting under it — the
+   label sits beside the orb in the markup, not inside it, so the state
+   is set on both from the same JS call. Cyan by default (listening,
+   thinking, idle); speaking gets the orb's pastel green so the label
+   agrees with the glow instead of just naming it. */
 .orb-state {
   margin: 18px 0 0;
   font-size: 11px;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--accent-soft);
+  transition: color 0.3s ease;
 }
 
+.orb-state[data-state="speaking"] {
+  color: var(--success-soft);
+}
+
+/* Capped at ~6 lines instead of growing with the transcript. A long
+   answer or a rambling reply would otherwise push the toggle button
+   further down the panel with every sentence. Content sits at the
+   bottom of the box (flex + flex-end) so the newest words are always
+   the ones visible, and a top mask fades the overflow out instead of
+   hard-clipping it — it reads as older text scrolling out of view,
+   not text getting cut off mid-word. */
 .orb-caption {
   margin: 10px 0 0;
   min-height: 34px;
-  max-height: 88px;
-  overflow-y: auto;
+  max-height: 114px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   text-align: center;
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-muted);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
 }
 
 #voice-toggle {

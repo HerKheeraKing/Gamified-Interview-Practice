@@ -914,6 +914,10 @@ const Practice = (() => {
   function setOrb(state, label, caption) {
     if (state !== null) {
       document.getElementById("orb").dataset.state = state;
+      // The label sits beside the orb, not inside it, so it can't pick
+      // up the state through descendant CSS — it needs its own copy to
+      // recolour itself when Claude starts speaking.
+      document.getElementById("orb-state").dataset.state = state;
     }
     if (label !== null && label !== undefined) {
       document.getElementById("orb-state").textContent = label;
