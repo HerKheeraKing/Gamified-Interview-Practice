@@ -4,7 +4,41 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>The Interview Case Files</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%231a1830'/%3E%3Ccircle cx='32' cy='32' r='13' fill='%23ffffff' opacity='0.95'/%3E%3Ccircle cx='32' cy='32' r='13' fill='%23f7c6e0' opacity='0.55'/%3E%3Ccircle cx='32' cy='32' r='6' fill='%23ffffff'/%3E%3C/svg%3E" />
+<meta name="description" content="Every interview is a case. Every question is a lead. A gamified field manual for AWS and Python interview prep — work the question like a detective, earn XP, close the case." />
+
+<!-- Icons. The SVG is what modern browsers pick up; favicon.ico covers
+     the clients that ignore it, and apple-touch-icon is what iOS uses on
+     the home screen. All three are the lens mark, deliberately not
+     XP_Icon.png — that one is a rank badge shown beside a level, and it
+     has neither the aspect ratio nor the meaning to stand in for the
+     site as a whole. -->
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="icon" sizes="32x32" href="favicon.ico" />
+<link rel="apple-touch-icon" href="assets/images/apple-touch-icon.png" />
+<meta name="theme-color" content="#06050d" />
+
+<!-- Share previews.
+     Absolute URLs are not optional here: scrapers fetch these with no
+     document base, so a relative path resolves against their own host
+     and the image silently drops. And without an explicit og:image the
+     crawler falls back to guessing from the page's own images, which is
+     how the rank badge ended up stretched across the link preview. -->
+<link rel="canonical" href="https://kheeras-case-method.theeveningedit-co.workers.dev/" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="The Interview Case Files" />
+<meta property="og:url" content="https://kheeras-case-method.theeveningedit-co.workers.dev/" />
+<meta property="og:title" content="The Interview Case Files" />
+<meta property="og:description" content="Every interview is a case. Every question is a lead. A gamified field manual for AWS and Python interview prep — work the question like a detective, earn XP, close the case." />
+<meta property="og:image" content="https://kheeras-case-method.theeveningedit-co.workers.dev/assets/images/og-card.png" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="The Interview Case Files — a detective in profile, eyes lit by a band of light." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="The Interview Case Files" />
+<meta name="twitter:description" content="Every interview is a case. Every question is a lead. A gamified field manual for AWS and Python interview prep." />
+<meta name="twitter:image" content="https://kheeras-case-method.theeveningedit-co.workers.dev/assets/images/og-card.png" />
+
 <link rel="stylesheet" href="assets/css/style.css" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
