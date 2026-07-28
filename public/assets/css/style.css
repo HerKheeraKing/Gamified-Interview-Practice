@@ -1448,48 +1448,128 @@ main {
   gap: 8px;
 }
 
-/* The device picker. Deliberately quiet and narrow — it's a confirmation
-   that the right microphone is in play, not a control anyone needs to
-   touch twice. */
-.mic-select {
+/* The device picker: a caret that opens a glass menu.
+   Icon only. The device name lives in the menu, not in the composer —
+   a name in the trigger would take space and, worse, resize the row
+   every time a different device was chosen. */
+.mic-picker {
+  position: relative;
   flex: 0 0 auto;
-  max-width: 132px;
+  display: flex;
+}
+
+.mic-picker[hidden] { display: none; }
+
+.mic-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
   height: 38px;
-  padding: 0 26px 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 999px;
-  background-color: rgba(0, 0, 0, 0.25);
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color 0.18s ease, transform 0.18s ease;
+}
+
+.mic-caret:hover { color: var(--text-primary); }
+
+/* A device other than the system default is in play — the only hint the
+   trigger gives, since it carries no text. */
+.mic-caret.chosen { color: var(--success-soft); }
+
+.mic-picker.open .mic-caret { transform: rotate(180deg); }
+
+/* Absolutely positioned, so opening it costs the composer nothing: the
+   row keeps its height, the answer box keeps its width, and nothing
+   below moves. Opens upward because the composer sits at the bottom of
+   the modal. */
+.mic-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 5;
+  min-width: 208px;
+  max-width: 264px;
+  padding: 6px;
+  border: 1px solid rgba(165, 230, 255, 0.3);
+  border-radius: 12px;
+
+  /* Same glass recipe as the panel and the preview card, one step
+     lighter again because it floats above both. */
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 45%, rgba(125,211,252,0.06) 100%),
+    rgba(30, 28, 52, 0.82);
+  backdrop-filter: blur(20px) saturate(130%);
+  -webkit-backdrop-filter: blur(20px) saturate(130%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 22px rgba(125, 211, 252, 0.16),
+    0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.mic-menu[hidden] { display: none; }
+
+/* More opaque than its siblings on purpose. Everything else in the modal
+   sits on a fixed backdrop; this one floats over live text, and at the
+   panel's ~0.16 the words underneath read straight through it. */
+
+.mic-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
   color: var(--text-muted);
   font-family: var(--font-sans);
-  font-size: 11.5px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
   cursor: pointer;
-  outline: none;
-  transition: all 0.18s ease;
+  transition: all 0.15s ease;
+}
 
-  /* Native arrow off, own chevron on, so it matches the round controls
-     beside it instead of dropping an OS widget into the glass. */
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a95ab' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 9px center;
-  background-size: 12px 12px;
+.mic-option:hover {
+  background: rgba(125, 211, 252, 0.14);
+  color: var(--text-primary);
+}
+
+.mic-option[aria-selected="true"] {
+  background: rgba(125, 211, 252, 0.16);
+  color: var(--text-primary);
+}
+
+.mic-option .tick {
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--accent-soft);
+  opacity: 0;
+}
+
+.mic-option[aria-selected="true"] .tick { opacity: 1; }
+
+.mic-option .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.mic-select[hidden] { display: none; }
-
-.mic-select:hover,
-.mic-select:focus {
-  border-color: var(--border-glow);
-  color: var(--text-primary);
-}
-
-/* The popup is drawn by the OS, so it needs a solid background of its
-   own — a translucent one renders as unreadable dark-on-dark. */
-.mic-select option {
-  background: var(--bg-panel-solid);
-  color: var(--text-primary);
+/* The caveat, where someone choosing a device will actually read it —
+   a tooltip on the trigger goes unseen. */
+.mic-note {
+  margin: 6px 4px 2px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
 }
 
 .practice-input {

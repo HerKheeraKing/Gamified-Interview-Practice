@@ -166,13 +166,24 @@ steers capture onto that device, because the recogniser attaches to the
 live stream — but that is an implementation detail, not a contract.
 
 **If a choice doesn't take, change the default input in your OS sound
-settings.** That is the only guaranteed lever, and the select's tooltip
-says so rather than implying otherwise.
+settings.** That is the only guaranteed lever, and it's printed at the
+foot of the menu rather than left implied — a tooltip on the trigger
+goes unread by exactly the person who needs it.
+
+The picker is a caret and a hand-rolled popover, not a `<select>`. A
+native select's popup is drawn by the OS, so it can't take the glass
+treatment, and its box is sized by the selected option's text — which
+put a long device name in the composer and resized the row whenever the
+choice changed. The menu is absolutely positioned, so opening it costs
+the composer nothing.
 
 Device labels are withheld by `enumerateDevices()` until the page has
 been granted a microphone at least once, so the list reads "Microphone
-1, 2" until you first press dictate — entering a practice mode never
-spends a permission prompt just to populate a dropdown.
+1, 2" only until the first grant — after that the real names come back
+for free, and Chrome remembers the grant across visits. The menu is
+rebuilt every time it opens, so labels upgrade and newly plugged devices
+appear without a reload. Opening it never spends a permission prompt;
+pressing dictate does, because the prompt is coming anyway.
 
 `Dictation` is a separate module from `Voice` despite driving the same
 recogniser. Voice owns turn-taking, synthesis and a conversation with

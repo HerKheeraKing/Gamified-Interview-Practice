@@ -239,13 +239,30 @@
                    can differ from the gap between the controls. -->
               <div class="composer-actions">
 
-              <select
-                id="mic-select"
-                class="mic-select"
-                aria-label="Microphone"
-                title="Which microphone to open. Browser speech recognition follows your system default input, so if a choice here doesn't take, change the default in your OS sound settings."
-                hidden
-              ></select>
+              <!-- Not a <select>. The OS draws that popup, so it can't
+                   be given the glass treatment, and its box is sized by
+                   the selected option's text — which is what put a long
+                   device name in the composer and resized the row. This
+                   is a caret plus an absolutely positioned menu: no
+                   text, no reflow, fully styleable. -->
+              <div class="mic-picker" id="mic-picker" hidden>
+                <button
+                  type="button"
+                  class="mic-caret"
+                  id="mic-caret"
+                  aria-label="Choose microphone"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                  title="Choose which microphone to use"
+                >
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none"
+                       stroke="currentColor" stroke-width="2.6" stroke-linecap="round"
+                       stroke-linejoin="round" aria-hidden="true">
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+                <div class="mic-menu" id="mic-menu" role="listbox" aria-label="Microphone" hidden></div>
+              </div>
 
               <button
                 type="button"

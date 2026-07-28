@@ -518,8 +518,8 @@ const Practice = (() => {
     document.getElementById("preview-expand").addEventListener("click", toggleExpand);
     document.getElementById("practice-mic").addEventListener("click", toggleDictation);
 
-    const mics = document.getElementById("mic-select");
-    mics.addEventListener("change", () => Microphones.choose(mics.value));
+    document.getElementById("mic-caret").addEventListener("click", toggleMicMenu);
+    document.getElementById("mic-menu").addEventListener("click", chooseMic);
     // Plugging in AirPods mid-session should show up without a reload.
     Microphones.onChange(() => listMics());
     document.getElementById("voice-toggle").addEventListener("click", toggleVoice);
@@ -578,7 +578,7 @@ const Practice = (() => {
 
     // The picker stays up in Live Voice too — the device matters just as
     // much there, and the orb's mic button is nowhere near it.
-    document.getElementById("mic-select").hidden = mode === "handoff";
+    closeMicMenu();
     listMics();
 
     // Voice mode opens the conversation immediately but not the
@@ -982,46 +982,108 @@ const Practice = (() => {
   /* ---- which microphone ---- */
 
   /**
-   * Fill the device picker.
+   * Fill the device menu.
    *
    * `prime` decides whether it's willing to spend a permission prompt to
-   * learn the real device names. Entering a mode isn't worth one — the
-   * list shows up as "Microphone 1, 2" and nobody has asked for the
-   * microphone yet. Reaching for dictation is, because the prompt is
-   * coming anyway.
+   * learn the real device names. Opening the menu isn't worth one on its
+   * own — but it rarely needs one either: once the microphone has been
+   * granted, enumerateDevices() keeps handing back real labels for the
+   * rest of the session, and Chrome remembers the grant across visits.
+   * Generic names mean the page has genuinely never held a microphone.
+   * Pressing dictate primes, because the prompt is coming anyway.
+   *
+   * Rebuilt every time the menu opens rather than cached, so a device
+   * plugged in since last time is simply there, and so labels upgrade
+   * from generic to real the moment permission exists.
    *
    * What it can't do is make the recogniser obey. SpeechRecognition
-   * takes no device, so this reports and requests rather than commands;
-   * the select's tooltip says as much, and the OS default is the real
-   * lever. Showing which inputs exist is still the point — it's the
-   * difference between suspecting the wrong mic and knowing.
+   * takes no device, so this reports and requests rather than commands.
+   * The note at the foot of the menu says so — that's where someone
+   * choosing a device will actually read it.
    */
   async function listMics({ prime = false } = {}) {
-    const select = document.getElementById("mic-select");
+    const picker = document.getElementById("mic-picker");
+    const menu = document.getElementById("mic-menu");
+
     if (!Microphones.supported() || !Dictation.supported()) {
-      select.hidden = true;
+      picker.hidden = true;
       return;
     }
 
     const devices = await Microphones.list({ prime });
-    if (devices.length === 0) {
-      select.hidden = true;
+    picker.hidden = mode === "handoff" || devices.length === 0;
+    if (picker.hidden) {
+      closeMicMenu();
       return;
     }
 
-    const saved = Microphones.chosen();
-    select.innerHTML =
-      `<option value="">System default mic</option>` +
-      devices
-        .map((d) => `<option value="${escapeAttr(d.id)}">${escapeText(d.label)}</option>`)
-        .join("");
-
     // A remembered device that has since been unplugged falls back to
     // the default rather than showing a selection that isn't real.
-    select.value = devices.some((d) => d.id === saved) ? saved : "";
-    if (select.value !== saved) Microphones.choose("");
+    const saved = Microphones.chosen();
+    const live = devices.some((d) => d.id === saved) ? saved : "";
+    if (live !== saved) Microphones.choose(live);
 
-    select.hidden = mode === "handoff";
+    const rows = [{ id: "", label: "System default" }, ...devices];
+    menu.innerHTML =
+      rows.map((d) => option(d, d.id === live)).join("") +
+      `<p class="mic-note">Browser speech recognition follows your system
+       default input. If a choice here doesn't take, change the default in
+       your computer's sound settings.</p>`;
+
+    document.getElementById("mic-caret").classList.toggle("chosen", Boolean(live));
+  }
+
+  function option(device, selected) {
+    return `
+      <button type="button" class="mic-option" role="option"
+              aria-selected="${selected}" data-device="${escapeAttr(device.id)}">
+        <span class="tick" aria-hidden="true">✓</span>
+        <span class="name">${escapeText(device.label)}</span>
+      </button>
+    `;
+  }
+
+  /* ---- the menu ---- */
+
+  function toggleMicMenu() {
+    if (document.getElementById("mic-menu").hidden) {
+      openMicMenu();
+    } else {
+      closeMicMenu();
+    }
+  }
+
+  function openMicMenu() {
+    document.getElementById("mic-menu").hidden = false;
+    document.getElementById("mic-picker").classList.add("open");
+    document.getElementById("mic-caret").setAttribute("aria-expanded", "true");
+    // Capture phase, so a click anywhere closes it before that click can
+    // be acted on twice.
+    document.addEventListener("click", onClickAway, true);
+    listMics();
+  }
+
+  /** True when there was a menu to close — the Escape key asks first. */
+  function closeMicMenu() {
+    const menu = document.getElementById("mic-menu");
+    const wasOpen = !menu.hidden;
+    menu.hidden = true;
+    document.getElementById("mic-picker").classList.remove("open");
+    document.getElementById("mic-caret").setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", onClickAway, true);
+    return wasOpen;
+  }
+
+  function onClickAway(event) {
+    if (!event.target.closest("#mic-picker")) closeMicMenu();
+  }
+
+  function chooseMic(event) {
+    const option = event.target.closest(".mic-option");
+    if (!option) return;
+    Microphones.choose(option.dataset.device);
+    closeMicMenu();
+    listMics();
   }
 
   function escapeAttr(value) {
@@ -1050,7 +1112,16 @@ const Practice = (() => {
     status.classList.toggle("ok", copied);
   }
 
-  return { init, reset };
+  /**
+   * Shut anything transient that's open. Reports whether there was
+   * something, so Escape can dismiss a menu without also closing the
+   * case behind it.
+   */
+  function dismiss() {
+    return closeMicMenu();
+  }
+
+  return { init, reset, dismiss };
 })();
 
 /* ---------------------------------------------------------- */
@@ -1205,8 +1276,12 @@ function bootstrap() {
 
   // A live microphone behind a dismissed modal is the one failure worth
   // wiring a keyboard escape for; ScoreModal.close() shuts Practice down.
+  // An open menu gets first refusal, so Escape dismisses that rather than
+  // throwing away the case behind it.
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") ScoreModal.close();
+    if (e.key !== "Escape") return;
+    if (Practice.dismiss()) return;
+    ScoreModal.close();
   });
 
   document.getElementById("reset-btn").addEventListener("click", () => {
