@@ -240,6 +240,17 @@ const Speaker = (() => {
   // Whether speak() has been reached from a user gesture yet. See unlock().
   let unlocked = false;
 
+  /**
+   * Words per second, as actually observed on this device.
+   *
+   * Only used to keep a rhythm going on engines that don't emit word
+   * boundaries — see the pacer in say(). It starts at a plausible number
+   * for English at this rate and is corrected after every utterance that
+   * completes, so a slow voice or a slow iPad converges on its own tempo
+   * within a sentence or two rather than being guessed at forever.
+   */
+  let observedWps = 2.6 * RATE;
+
   // The last voice reported to the console, so the report happens when
   // the answer changes rather than on every reply. See announce().
   let announced = null;
@@ -299,7 +310,7 @@ const Speaker = (() => {
    * of word. No caller needs to know which kind of engine it got.
    */
   function say(text, on) {
-    const handlers = { spoken() {}, voice: undefined, ...on };
+    const handlers = { spoken() {}, beat() {}, voice: undefined, ...on };
 
     if (!engine || !text.trim()) {
       handlers.spoken(text);
@@ -327,11 +338,24 @@ const Speaker = (() => {
 
       let started = false;
       let done = false;
+      let sawBoundary = false;
+      let pacer = null;
+      const words = (text.match(/\S+/g) || []).length;
 
       const finish = () => {
         if (done) return;
         done = true;
         clearInterval(guard);
+        clearInterval(pacer);
+        // What this utterance turned out to cost, so the next one that
+        // has to keep its own time is pacing off a measured rate rather
+        // than a assumed one. Guarded against the degenerate cases: an
+        // utterance that was dropped, or one so short the clock can't
+        // say anything useful about it.
+        const seconds = (Date.now() - began) / 1000;
+        if (started && words >= 4 && seconds > 1) {
+          observedWps = words / seconds;
+        }
         // Whatever the boundaries did or didn't say, the sentence is
         // fully spoken now, so the caption ends up whole either way.
         handlers.spoken(text);
@@ -343,11 +367,48 @@ const Speaker = (() => {
         // Sentence boundaries repeat ground the word events already
         // cover, and would rewind the caption when they do.
         if (event.name && event.name !== "word") return;
+        // A real word just left the speaker. This is the good case: the
+        // rhythm is the speech, not a model of it.
+        sawBoundary = true;
+        clearInterval(pacer);
+        pacer = null;
+        handlers.beat();
         const length = event.charLength || 0;
         handlers.spoken(text.slice(0, event.charIndex + length));
       };
 
-      utterance.onstart = () => { started = true; };
+      utterance.onstart = () => {
+        started = true;
+        pace();
+      };
+
+      /**
+       * Keep a beat going on engines that never report word boundaries.
+       *
+       * WebKit is the one that matters here: it fires no `boundary`
+       * events at all, so on iPad the only honest timing signals for a
+       * whole utterance are its start and its end. Those two are worth
+       * more than they look — they bound the speech exactly, and the
+       * word count in between is known — so the tempo is measured rather
+       * than invented, and it stops dead when the speech does.
+       *
+       * This paces the *animation* only. The caption is still written
+       * from real events and never from this clock: a pulse that is
+       * slightly out of step is decoration, while a caption that claims
+       * words have been spoken before they have is a lie about what the
+       * candidate just heard.
+       *
+       * The first real boundary cancels it, so engines that do report
+       * words never run both.
+       */
+      function pace() {
+        if (sawBoundary || pacer) return;
+        const interval = Math.min(600, Math.max(180, 1000 / observedWps));
+        pacer = setInterval(() => {
+          if (done) return;
+          handlers.beat();
+        }, interval);
+      }
       utterance.onend = finish;
       // A failed utterance must still resolve, or the caller's queue
       // stalls forever waiting on a voice that never spoke.
@@ -375,6 +436,9 @@ const Speaker = (() => {
         if (done) return;
         if (engine.speaking || engine.pending) {
           started = true;
+          // `start` is as skippable as `end` on WebKit, so the guard is
+          // also what gets the rhythm going there.
+          pace();
           return;
         }
         if (started || Date.now() - began > START_GRACE_MS) finish();
@@ -860,7 +924,7 @@ const Voice = (() => {
 
     session = {
       question,
-      on: { state() {}, heard() {}, said() {}, grades() {}, error() {}, ...on },
+      on: { state() {}, heard() {}, said() {}, beat() {}, grades() {}, error() {}, ...on },
       messages: [],
       recogniser: null,
       silence: null,
@@ -1292,6 +1356,10 @@ const Voice = (() => {
           // speaker at the same volume because they are all handed the
           // same one, and `say` never chooses over the top of it.
           voice: session.voice,
+          beat() {
+            if (!session || session.turn !== turn) return;
+            session.on.beat();
+          },
           spoken(prefix) {
             if (!session || session.turn !== turn) return;
             session.aloud = joined(before, prefix);

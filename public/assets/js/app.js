@@ -1071,6 +1071,9 @@ const Practice = (() => {
       said(text) {
         setOrb(null, null, text);
       },
+      beat() {
+        pulseOrb();
+      },
       grades(scores) {
         ScoreModal.applyGrades(scores);
         settleBudget();
@@ -1150,10 +1153,58 @@ const Practice = (() => {
     speaking: "Speaking",
   };
 
+  /**
+   * One pulse of the orb, for one word actually spoken.
+   *
+   * The speaking orb used to run a fixed 0.62s CSS loop, which is a
+   * plausible rhythm and never once the rhythm of the sentence being
+   * read — it ran at the same tempo through a clipped three-word answer
+   * and a long slow explanation, and kept running through the gaps
+   * between utterances. Driving it from the speech makes the orb agree
+   * with the ears.
+   *
+   * Every beat is one animation, started when the word starts and left
+   * to finish on its own, so beats arriving faster than they can play
+   * simply overlap. Nothing needs cancelling and there is no loop to
+   * keep in phase.
+   *
+   * `data-pulse` is what silences the CSS loop, and it is set here — on
+   * the first beat — rather than when speech begins. If beats never
+   * arrive, because the engine reports nothing and the pacer is off or
+   * Web Animations is missing, the old loop is still running and the orb
+   * still looks alive. The fallback is the default; this replaces it
+   * only once there is something better to show.
+   */
+  function pulseOrb() {
+    const orb = document.getElementById("orb");
+    const core = orb.querySelector(".orb-core");
+    if (!core || typeof core.animate !== "function") return;
+    // Motion is the whole of this effect, so honouring the preference
+    // means not running it at all. The CSS loop is already suppressed
+    // for these users by the same query.
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    orb.dataset.pulse = "speech";
+    core.animate(
+      [
+        { opacity: 0.72, transform: "scale(0.94)" },
+        { opacity: 1, transform: "scale(1.13)", offset: 0.3 },
+        { opacity: 0.72, transform: "scale(0.94)" },
+      ],
+      { duration: 340, easing: "ease-out" }
+    );
+  }
+
   /** Null for state or caption means "leave that one alone". */
   function setOrb(state, label, caption) {
     if (state !== null) {
       document.getElementById("orb").dataset.state = state;
+      // The driven pulse belongs to one stretch of speech. Handing the
+      // orb back to CSS at every state change is what stops a finished
+      // reply leaving it frozen mid-scale until the next word arrives.
+      if (state !== "speaking") {
+        delete document.getElementById("orb").dataset.pulse;
+      }
       // The label sits beside the orb, not inside it, so it can't pick
       // up the state through descendant CSS — it needs its own copy to
       // recolour itself when Claude starts speaking.
