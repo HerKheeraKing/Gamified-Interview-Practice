@@ -467,6 +467,36 @@
             GENERATE
           </button>
 
+          <!-- Bulk revoke. Lives under the single-code action on the
+               Revoke tab rather than in a tab of its own, because it is
+               the same operation at a different scale and shares the
+               token typed above.
+
+               Two steps, unlike every other action in this panel. The
+               single-code revoke is one code you named and can undo by
+               name; this one is every code at once, and afterwards there
+               is no list on screen saying which they were. The arming
+               step is the only place to notice that. -->
+          <div class="admin-bulk" id="admin-bulk" hidden>
+            <button type="button" class="ghost-btn admin-bulk-btn" id="admin-revoke-all">
+              Revoke all codes
+            </button>
+
+            <div class="admin-confirm" id="admin-confirm" hidden>
+              <p class="admin-confirm-text">
+                Switch off <strong>every</strong> invite code? Testers keep their
+                case files, XP and sync — all of them lose AI coaching on their
+                next turn. Each code can be switched back on individually.
+              </p>
+              <div class="admin-confirm-actions">
+                <button type="button" class="ghost-btn" id="admin-confirm-cancel">Cancel</button>
+                <button type="button" class="ghost-btn admin-confirm-yes" id="admin-confirm-yes">
+                  Yes, revoke all
+                </button>
+              </div>
+            </div>
+          </div>
+
           <p class="login-error" id="admin-error"></p>
 
           <!-- Shown, not just copied. A clipboard write that silently

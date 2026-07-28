@@ -1159,6 +1159,28 @@ const Admin = (() => {
     };
   }
 
+  /**
+   * Switch every live code off at once.
+   *
+   * One statement rather than a list-then-patch loop in the browser.
+   * A loop would be N round trips that can fail halfway, leaving some
+   * codes off and some on with nothing to say which — and "revoke
+   * everything" is precisely the operation where a partial result is
+   * worse than no result.
+   *
+   * Returns how many were actually switched off. Codes that were already
+   * inactive are excluded by the WHERE clause and so are not counted:
+   * they were not revoked by this call, and saying otherwise would
+   * inflate the number on the one screen that exists to be believed.
+   */
+  async function revokeAll(db) {
+    const result = await db
+      .prepare("UPDATE invite_codes SET active = 0 WHERE active = 1")
+      .run();
+
+    return (result.meta && result.meta.changes) || 0;
+  }
+
   /** Bounded because a typo in a cap is a typo in a credit limit. */
   function clampCap(value) {
     const cap = Number(value);
@@ -1182,7 +1204,7 @@ const Admin = (() => {
     };
   }
 
-  return { authorised, list, create, update };
+  return { authorised, list, create, update, revokeAll };
 })();
 
 /* ---------------------------------------------------------- */
@@ -1408,6 +1430,15 @@ async function handleAdmin(request, env, path) {
 
   if (path === "/api/admin/codes" && request.method === "POST") {
     return Responses.json({ code: await Admin.create(env.DB, await readJson(request)) }, 201);
+  }
+
+  // Ahead of the per-code PATCH below, and a POST rather than a PATCH,
+  // so it can never be mistaken for an operation on a code that happens
+  // to be named "revoke-all". Codes are minted as CASE-XXXX-XXXX-XXXX,
+  // so that name is unreachable — but relying on that would make this
+  // route's safety depend on the shape of a string generated elsewhere.
+  if (path === "/api/admin/codes/revoke-all" && request.method === "POST") {
+    return Responses.json({ revoked: await Admin.revokeAll(env.DB) });
   }
 
   if (path.startsWith("/api/admin/codes/") && request.method === "PATCH") {

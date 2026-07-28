@@ -1518,6 +1518,10 @@ const Minting = (() => {
       if (tab) choose(tab.dataset.op);
     });
 
+    document.getElementById("admin-revoke-all").addEventListener("click", arm);
+    document.getElementById("admin-confirm-cancel").addEventListener("click", disarm);
+    document.getElementById("admin-confirm-yes").addEventListener("click", revokeAll);
+
     // Enter inside the panel runs the current operation; it must never
     // fall through to the sign-in button sitting a few pixels above it.
     ["admin-token", "admin-cap", "admin-revoke-code"].forEach((id) => {
@@ -1553,6 +1557,8 @@ const Minting = (() => {
 
     document.getElementById("admin-mint-field").hidden = op !== "mint";
     document.getElementById("admin-revoke-field").hidden = op !== "revoke";
+    document.getElementById("admin-bulk").hidden = op !== "revoke";
+    disarm();
 
     const button = document.getElementById("admin-generate");
     button.textContent = op === "mint" ? "GENERATE" : "REVOKE";
@@ -1634,7 +1640,7 @@ const Minting = (() => {
       return;
     }
 
-    await attempt("MINTING…", async () => {
+    await attempt("admin-generate", "MINTING…", async () => {
       const minted = await Api.mintCode(token, cap);
       show(
         minted.code,
@@ -1664,7 +1670,7 @@ const Minting = (() => {
       return;
     }
 
-    await attempt("REVOKING…", async () => {
+    await attempt("admin-generate", "REVOKING…", async () => {
       const { code: revoked, wasActive } = await Api.revokeCode(token, code);
 
       // Reporting the no-op honestly. Switching off a code that was
@@ -1680,6 +1686,58 @@ const Minting = (() => {
       );
       document.getElementById("admin-revoke-code").value = "";
     });
+  }
+
+  /* ---- bulk revoke: two steps, on purpose ---- */
+
+  /**
+   * Show the confirmation and hide the button that opened it.
+   *
+   * Swapping rather than stacking, so there is never a moment where two
+   * buttons that both say "revoke all" are on screen at once and the
+   * wrong one is one pixel away.
+   */
+  function arm() {
+    setError("");
+    document.getElementById("admin-revoke-all").hidden = true;
+    document.getElementById("admin-confirm").hidden = false;
+    document.getElementById("admin-confirm-yes").focus();
+  }
+
+  /**
+   * Put the confirmation away.
+   *
+   * Called on cancel, on switching tabs, on closing the modal, and after
+   * the operation runs — an armed destructive action must not survive
+   * the moment it was armed in, least of all behind a closed modal that
+   * reopens looking ready to fire.
+   */
+  function disarm() {
+    document.getElementById("admin-revoke-all").hidden = false;
+    document.getElementById("admin-confirm").hidden = true;
+  }
+
+  async function revokeAll() {
+    const token = adminToken();
+    if (!token) {
+      disarm();
+      return;
+    }
+
+    await attempt("admin-confirm-yes", "REVOKING…", async () => {
+      const revoked = await Api.revokeAllCodes(token);
+      show(
+        "",
+        revoked === 0
+          ? "Nothing to revoke — every invite code was already switched off."
+          : `Revoked ${revoked} invite code${revoked === 1 ? "" : "s"}. AI coaching stops for all of them on the next turn.`
+      );
+    });
+
+    // After the run either way: a confirmation left armed invites a
+    // second press that would report "nothing to revoke" and read like
+    // the first one silently failed.
+    disarm();
   }
 
   /** The shared credential, or "" with the error already on screen. */
@@ -1699,8 +1757,8 @@ const Minting = (() => {
    * precisely because the `finally` is the part that is easy to forget
    * in the second copy, and forgetting it leaves the panel dead.
    */
-  async function attempt(busyLabel, work) {
-    const button = document.getElementById("admin-generate");
+  async function attempt(buttonId, busyLabel, work) {
+    const button = document.getElementById(buttonId);
     const label = button.textContent;
 
     button.disabled = true;
@@ -1717,15 +1775,22 @@ const Minting = (() => {
     }
   }
 
+  /**
+   * Report what happened. `code` is the one this concerned, or "" when
+   * the operation had no single subject — revoking everything names no
+   * code, and an empty monospace slot sitting there would read as one
+   * that failed to load.
+   */
   function show(code, message) {
     const result = document.getElementById("admin-result");
     document.getElementById("admin-code").textContent = code;
+    document.getElementById("admin-code").hidden = !code;
     document.getElementById("admin-result-label").textContent = message;
     result.hidden = false;
     document.getElementById("admin-copy").textContent = "Copy";
     // Copying a code you just switched off is a button that does nothing
     // useful; the string is still selectable if it's wanted.
-    document.getElementById("admin-copy").hidden = op !== "mint";
+    document.getElementById("admin-copy").hidden = op !== "mint" || !code;
 
     // The result is the last thing in a modal that now scrolls, so on a
     // short window it lands below the fold — which is indistinguishable

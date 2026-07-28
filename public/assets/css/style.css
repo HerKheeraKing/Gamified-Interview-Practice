@@ -1340,6 +1340,73 @@ main {
 }
 
 
+/* ---- bulk revoke ---- */
+
+/* Set apart by a rule and a good gap. It is the same operation as the
+   button above it at a much larger scale, and the two must not read as a
+   pair of equally routine choices. */
+.admin-bulk {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  text-align: center;
+}
+
+/* Quiet until armed. An always-red "revoke everything" sitting in the
+   panel would be the loudest thing on screen and the rarest thing
+   wanted. */
+.admin-bulk-btn {
+  padding: 8px 20px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.admin-bulk-btn:hover {
+  border-color: rgba(242, 120, 154, 0.45);
+  color: var(--danger);
+}
+
+.admin-confirm {
+  padding: 14px;
+  border: 1px solid rgba(242, 120, 154, 0.35);
+  border-radius: 12px;
+  background: rgba(242, 120, 154, 0.06);
+  text-align: left;
+}
+
+.admin-confirm-text {
+  margin: 0 0 12px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.admin-confirm-text strong {
+  color: var(--danger);
+}
+
+.admin-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.admin-confirm-actions .ghost-btn {
+  padding: 8px 16px;
+  font-size: 12px;
+}
+
+.admin-confirm-yes {
+  border-color: rgba(242, 120, 154, 0.5);
+  color: var(--danger);
+}
+
+.admin-confirm-yes:hover {
+  border-color: var(--danger);
+  background: rgba(242, 120, 154, 0.14);
+  color: #ffe2ea;
+}
+
 /* The minted code, sized to be read off a screen and retyped. Monospace
    and wide-tracked because that is the job: CASE-7F3K-92QX-M4TB gets
    copied into a chat window, and the alphabet already avoids the

@@ -228,6 +228,23 @@ const Api = (() => {
    * doesn't exist. The `reason` field is what separates them; a bad
    * token never carries one, so it cannot be used to probe for codes.
    */
+  /**
+   * Switch every live invite code off. Resolves to the number actually
+   * switched — zero when they were all off already, which is a real
+   * answer and not a failure.
+   */
+  async function revokeAllCodes(adminToken) {
+    try {
+      const res = await send("/api/admin/codes/revoke-all", "POST", {}, { "x-admin-token": adminToken });
+      return res.revoked;
+    } catch (err) {
+      if (err.status === 404) {
+        throw new Error("That admin token wasn't accepted. Nothing was changed.");
+      }
+      throw err;
+    }
+  }
+
   async function revokeCode(adminToken, code) {
     try {
       const res = await send(
@@ -273,5 +290,5 @@ const Api = (() => {
     return data;
   }
 
-  return { signIn, refreshAccess, mintCode, revokeCode, pullLog, pushLog, clearLog };
+  return { signIn, refreshAccess, mintCode, revokeCode, revokeAllCodes, pullLog, pushLog, clearLog };
 })();

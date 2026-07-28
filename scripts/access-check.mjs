@@ -329,6 +329,39 @@ async function main() {
   check("revocation is reversible", restored.json.code.active, true);
   check("and the session comes back", (await coachTurn(guest.json.token)).status, 200);
 
+  console.log("\nREVOKING EVERYTHING");
+  const noBulkAuth = await call("/api/admin/codes/revoke-all", { method: "POST", admin: "wrong" });
+  check("bulk revoke needs the token too", noBulkAuth.status, 404);
+
+  const beforeSweep = (await call("/api/admin/codes", { admin: ADMIN_TOKEN })).json.codes;
+  const stillLive = beforeSweep.filter((c) => c.active).length;
+  check("there is more than one live code to sweep", stillLive > 1, true);
+
+  const swept = await call("/api/admin/codes/revoke-all", { method: "POST", admin: ADMIN_TOKEN });
+  check("bulk revoke succeeds", swept.status, 200);
+  check("and counts only what it actually switched off", swept.json.revoked, stillLive);
+
+  const afterSweep = (await call("/api/admin/codes", { admin: ADMIN_TOKEN })).json.codes;
+  check("nothing is left live", afterSweep.filter((c) => c.active).length, 0);
+  check("no code was deleted", afterSweep.length, beforeSweep.length);
+  check("spend history survives the sweep", afterSweep.every((c) => c.spent_usd >= 0), true);
+
+  check("every invited account loses AI", (await coachTurn(guest.json.token)).status, 403);
+
+  // Zero is a real answer, not a failure — it is what "nothing to
+  // revoke" looks like, and the panel says so in those words.
+  const again3 = await call("/api/admin/codes/revoke-all", { method: "POST", admin: ADMIN_TOKEN });
+  check("a second sweep reports zero", again3.json.revoked, 0);
+
+  // A code named "revoke-all" is unreachable by design, but the route
+  // must not depend on that: POST is the sweep, PATCH is a lookup.
+  const notACode = await call("/api/admin/codes/revoke-all", { method: "PATCH", admin: ADMIN_TOKEN, body: { active: false } });
+  check("the sweep path is not a code name", notACode.json.reason, "unknown_code");
+
+  const revived = await call(`/api/admin/codes/${code}`, { method: "PATCH", admin: ADMIN_TOKEN, body: { active: true } });
+  check("individual codes can be switched back on after a sweep", revived.json.code.active, true);
+  check("and that account practises again", (await coachTurn(guest.json.token)).status, 200);
+
   console.log(failures === 0 ? "\nAll checks passed.\n" : `\n${failures} check(s) failed.\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

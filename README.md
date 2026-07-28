@@ -246,6 +246,8 @@ same modal, with two operations behind a segmented control:
 
 - **Generate** — a spend cap, and the minted code shown in place.
 - **Revoke** — a code to switch off, confirmed with what it had spent.
+  Below it, **Revoke all codes**: one sweep across every live code, with
+  an arming step first and a count afterwards.
 
 They share the admin token field and nothing else. The panel as a whole
 shares no field, no error line and no submit path with signing in, so
@@ -273,6 +275,21 @@ a confirm step would be guarding an outcome that costs one click to
 undo. Revoking a code that was already off reports itself as a no-op
 rather than a fresh revocation, so nobody is told they just cut access
 that had been cut for a week.
+
+**Revoking everything** is `POST /api/admin/codes/revoke-all`, one
+`UPDATE ... WHERE active = 1` rather than a list-then-patch loop in the
+browser. A loop would be N round trips that can fail halfway, leaving
+some codes off and some on with nothing to say which — and "revoke
+everything" is exactly the operation where a partial result is worse
+than no result. It answers with how many were *actually* switched off,
+so codes already inactive aren't counted, and a second sweep honestly
+reports zero.
+
+It is the only action in the panel with a confirmation step. The
+single-code revoke names one code and can be undone by name; this one
+touches every code at once and leaves no list on screen saying which
+they were, so the arming step is the only place to notice. The armed
+state does not survive switching tabs or closing the modal.
 
 **Two 404s that mean opposite things.** A bad admin token and an unknown
 invite code both answer 404 — the first deliberately, since an admin
@@ -312,6 +329,10 @@ curl -sX PATCH $BASE/api/admin/codes/CASE-7F3K-92QX-M4TB \
 curl -sX PATCH $BASE/api/admin/codes/CASE-7F3K-92QX-M4TB \
   -H "x-admin-token: $TOKEN" -H 'content-type: application/json' \
   -d '{"active":true}'
+
+# Switch every live code off in one statement
+curl -sX POST $BASE/api/admin/codes/revoke-all -H "x-admin-token: $TOKEN"
+# -> {"revoked":7}   codes already off aren't counted
 ```
 
 Or straight at the table, which is the same rows:
