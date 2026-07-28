@@ -247,6 +247,14 @@ async function main() {
   check("invited tier", guest.json.access.tier, "invited");
   check("invited has AI", guest.json.access.ai, true);
 
+  // The code is redeemed once and belongs to the account from then on.
+  // Signing in from a second device is codename-only, so a blank field
+  // must not read as "revoke my access" — that is what the COALESCE in
+  // openSession is for, and it is easy to lose in a later edit.
+  const again2 = await call("/api/session", { method: "POST", body: { username: "sam" } });
+  check("the code sticks without retyping it", again2.json.access.tier, "invited");
+  check("and stays the same code", again2.json.access.code, code);
+
   const guestTurn = await coachTurn(guest.json.token);
   check("invited reaches the interviewer", guestTurn.status, 200);
 

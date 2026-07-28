@@ -82,6 +82,22 @@ and doesn't need to know there are two mechanisms. Leaving it blank is a
 complete and working way to use the site, not a step being skipped. See
 [Access tiers](#access-tiers-and-the-spend-cap).
 
+**An invite code is entered once, not every login.** Redeeming it writes
+`detectives.access_code`, and later sign-ins use
+`COALESCE(?, access_code)` — a blank field leaves the stored code alone
+rather than clearing it. So the code belongs to the *codename* from then
+on, on every device, and signing in on a phone needs the codename only.
+The owner passphrase is the opposite: it is re-checked on every sign-in,
+because it is a credential rather than a redemption.
+
+Two consequences worth knowing. Revoking a code takes effect for every
+account that redeemed it, immediately, since the tier is re-read from
+the codes table on each `/api/coach` call rather than cached on the
+session. And because sign-in is still passwordless, anyone who knows a
+tester's codename inherits that tester's tier — the codename is the
+credential now, and that is the weak link if a code ever needs to be
+tightly held.
+
 ### First-time setup
 
 ```bash

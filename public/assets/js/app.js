@@ -1691,13 +1691,20 @@ const Minting = (() => {
   }
 
   function show(code, message) {
+    const result = document.getElementById("admin-result");
     document.getElementById("admin-code").textContent = code;
     document.getElementById("admin-result-label").textContent = message;
-    document.getElementById("admin-result").hidden = false;
+    result.hidden = false;
     document.getElementById("admin-copy").textContent = "Copy";
     // Copying a code you just switched off is a button that does nothing
     // useful; the string is still selectable if it's wanted.
     document.getElementById("admin-copy").hidden = op !== "mint";
+
+    // The result is the last thing in a modal that now scrolls, so on a
+    // short window it lands below the fold — which is indistinguishable
+    // from nothing having happened, and is exactly how a working revoke
+    // came to look like a broken one.
+    result.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
   function money(usd) {

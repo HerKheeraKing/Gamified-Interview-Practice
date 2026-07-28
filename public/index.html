@@ -460,7 +460,10 @@
             </p>
           </div>
 
-          <button type="button" class="pill-btn pill-btn-primary admin-generate" id="admin-generate">
+          <!-- Not pill-btn-primary: this button is green (or red once the
+               Revoke tab is chosen), and inheriting the white primary
+               would mean two rules fighting over the same background. -->
+          <button type="button" class="pill-btn admin-action" id="admin-generate">
             GENERATE
           </button>
 

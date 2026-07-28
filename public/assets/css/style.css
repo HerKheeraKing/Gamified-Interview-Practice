@@ -29,6 +29,22 @@
 
 * { box-sizing: border-box; }
 
+/* `hidden` means hidden, whatever else the element's class says.
+ *
+ * The attribute's `display: none` comes from the browser's own
+ * stylesheet, which loses to every author rule — so any component with
+ * `display: flex` or `display: block` in its class kept rendering while
+ * JavaScript believed it had put it away. That is not a theoretical
+ * hazard: it is why the Spend cap row stayed on screen under the Revoke
+ * tab, and it was silently true of the dictation button and the
+ * microphone picker as well.
+ *
+ * `!important` is the right tool exactly once, here. The alternative is
+ * remembering to re-assert `display: none` in every component that is
+ * ever toggled, which is the kind of rule that holds until someone adds
+ * the fifth component. */
+[hidden] { display: none !important; }
+
 /* ============================================================
    Scrollbars — one recipe, every scrolling surface
    ============================================================
@@ -76,6 +92,7 @@
 html::-webkit-scrollbar,
 body::-webkit-scrollbar,
 .log-table-scroll::-webkit-scrollbar,
+.login-modal::-webkit-scrollbar,
 .modal-scroll::-webkit-scrollbar,
 .chat-log::-webkit-scrollbar,
 .preview-body::-webkit-scrollbar,
@@ -86,6 +103,7 @@ body::-webkit-scrollbar,
 html::-webkit-scrollbar-thumb,
 body::-webkit-scrollbar-thumb,
 .log-table-scroll::-webkit-scrollbar-thumb,
+.login-modal::-webkit-scrollbar-thumb,
 .modal-scroll::-webkit-scrollbar-thumb,
 .chat-log::-webkit-scrollbar-thumb,
 .preview-body::-webkit-scrollbar-thumb,
@@ -103,6 +121,7 @@ body::-webkit-scrollbar-thumb,
 html::-webkit-scrollbar-thumb:hover,
 body::-webkit-scrollbar-thumb:hover,
 .log-table-scroll::-webkit-scrollbar-thumb:hover,
+.login-modal::-webkit-scrollbar-thumb:hover,
 .modal-scroll::-webkit-scrollbar-thumb:hover,
 .chat-log::-webkit-scrollbar-thumb:hover,
 .preview-body::-webkit-scrollbar-thumb:hover,
@@ -118,6 +137,7 @@ body::-webkit-scrollbar-thumb:hover,
 html::-webkit-scrollbar-track,
 body::-webkit-scrollbar-track,
 .log-table-scroll::-webkit-scrollbar-track,
+.login-modal::-webkit-scrollbar-track,
 .modal-scroll::-webkit-scrollbar-track,
 .chat-log::-webkit-scrollbar-track,
 .preview-body::-webkit-scrollbar-track,
@@ -1002,10 +1022,21 @@ main {
 
 /* Inherits the site glass recipe from .modal — this only sizes it down
    and centres the contents, so the two modals stay visually related. */
+/* The login modal scrolls itself.
+ *
+ * `.modal` caps height at 85vh and hides the overflow, and the case
+ * modal handles that with an inner `.modal-scroll`. This one has no
+ * inner wrapper, so anything past 85vh was simply cut off — which is
+ * what hid the minted code behind the bottom edge and made a revoke
+ * confirmation look like nothing had happened at all. Same element,
+ * so overriding `overflow` here is the whole fix.
+ */
 .login-modal {
   max-width: 440px;
   padding: 36px 32px 30px;
   text-align: center;
+  max-height: 85vh;
+  overflow-y: auto;
 }
 
 .login-title {
@@ -1127,20 +1158,24 @@ main {
 /* Two operations sharing one credential. A segmented control rather than
    two buttons side by side, because only one of them is ever armed and
    the field between them belongs to whichever is selected. */
+/* Centred and only as wide as its two labels. Stretched edge to edge it
+   read as two buttons that happened to touch; sized to its content it
+   reads as one control with a current position. */
 .admin-tabs {
   display: flex;
+  width: fit-content;
+  margin: 0 auto 16px;
   gap: 4px;
-  margin-bottom: 14px;
   padding: 3px;
-  border-radius: 10px;
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .admin-tab {
-  flex: 1;
-  padding: 7px 10px;
+  padding: 7px 26px;
   border: none;
-  border-radius: 8px;
+  border-radius: 999px;
   background: transparent;
   color: var(--text-faint);
   font-family: var(--font-sans);
@@ -1151,12 +1186,20 @@ main {
 }
 
 .admin-tab:hover {
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text-muted);
 }
 
+/* Transparent white rather than the accent blue — the selected tab is a
+   position marker, not a call to action, and it sits directly above a
+   button that is trying to be one. */
 .admin-tab.active {
-  background: rgba(125, 211, 252, 0.16);
+  background: rgba(255, 255, 255, 0.11);
   color: var(--text-primary);
+  box-shadow:
+    0 0 14px rgba(255, 255, 255, 0.16),
+    inset 0 0 10px rgba(255, 255, 255, 0.09),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .admin-code-input {
@@ -1174,18 +1217,71 @@ main {
   color: var(--text-faint);
 }
 
-/* Revoking is the one action here that takes something away, so the
-   button says so. Not disabled-looking and not hidden behind a confirm
-   dialog — it is reversible in one PATCH and destroys no data. */
-.admin-danger {
-  background: rgba(242, 120, 154, 0.16);
-  border-color: rgba(242, 120, 154, 0.5);
-  color: var(--danger);
+/* The panel's action button. Centred and sized to itself rather than
+   stretched, so it matches the tab row above it instead of spanning a
+   width nothing else in the panel uses.
+
+   Green because the default operation makes something. `.admin-danger`
+   swaps it to red when the panel is pointed at Revoke — same shape, same
+   glow, different colour, so the difference between the two operations
+   is legible before the label is read. */
+/* Qualified with `.pill-btn` deliberately. These rules sit earlier in
+   the file than `.pill-btn`, and at equal specificity the later rule
+   wins — so a bare `.admin-action` lost its background to
+   `.pill-btn { background: transparent }` and rendered colourless. The
+   Revoke variant only looked right by accident, because its second
+   class outweighed it. */
+.pill-btn.admin-action {
+  display: block;
+  flex: none;
+  width: auto;
+  min-width: 200px;
+  max-width: none;
+  margin: 4px auto 0;
+  background: linear-gradient(90deg, rgba(140, 232, 176, 0.16), rgba(182, 245, 205, 0.26));
+  border-color: rgba(182, 245, 205, 0.45);
+  color: #dcfbe8;
+  box-shadow:
+    0 0 18px rgba(140, 232, 176, 0.28),
+    inset 0 0 12px rgba(255, 255, 255, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  text-shadow: 0 0 10px rgba(182, 245, 205, 0.45);
 }
 
-.admin-danger:hover {
-  background: rgba(242, 120, 154, 0.24);
-  border-color: var(--danger);
+.pill-btn.admin-action:hover {
+  background: linear-gradient(90deg, rgba(140, 232, 176, 0.24), rgba(182, 245, 205, 0.36));
+  border-color: rgba(182, 245, 205, 0.7);
+  color: #f2fff7;
+  box-shadow:
+    0 0 26px rgba(140, 232, 176, 0.42),
+    inset 0 0 16px rgba(255, 255, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.36);
+  transform: translateY(-1px);
+}
+
+/* Revoking is the one action here that takes something away, so the
+   button says so. Not disabled-looking and not behind a confirm dialog —
+   it is reversible in one PATCH and destroys no data. */
+.pill-btn.admin-action.admin-danger {
+  background: linear-gradient(90deg, rgba(242, 120, 154, 0.16), rgba(255, 168, 193, 0.26));
+  border-color: rgba(255, 168, 193, 0.45);
+  color: #ffe2ea;
+  box-shadow:
+    0 0 18px rgba(242, 120, 154, 0.28),
+    inset 0 0 12px rgba(255, 255, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  text-shadow: 0 0 10px rgba(255, 168, 193, 0.45);
+}
+
+.pill-btn.admin-action.admin-danger:hover {
+  background: linear-gradient(90deg, rgba(242, 120, 154, 0.24), rgba(255, 168, 193, 0.36));
+  border-color: rgba(255, 168, 193, 0.7);
+  color: #fff4f7;
+  box-shadow:
+    0 0 26px rgba(242, 120, 154, 0.42),
+    inset 0 0 16px rgba(255, 255, 255, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+  transform: translateY(-1px);
 }
 
 .admin-input {
@@ -1237,9 +1333,6 @@ main {
   font-size: 14px;
 }
 
-.admin-generate {
-  width: 100%;
-}
 
 /* The minted code, sized to be read off a screen and retyped. Monospace
    and wide-tracked because that is the job: CASE-7F3K-92QX-M4TB gets
@@ -1298,24 +1391,30 @@ main {
   color: var(--text-primary);
 }
 
+/* Soft white rather than cyan.
+ *
+ * The modal already glows cyan at its border, its focus rings and its
+ * scrollbar, so a cyan primary button made the one thing the eye should
+ * land on the same colour as everything around it. White is the
+ * brightest thing available without introducing another hue. */
 .pill-btn-primary {
-  background: linear-gradient(90deg, rgba(125, 211, 252, 0.35), rgba(165, 230, 255, 0.45));
-  border-color: rgba(200, 245, 255, 0.6);
-  color: #eaf9ff;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.26));
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #f6fbff;
   box-shadow:
-    0 0 18px rgba(125, 211, 252, 0.5),
-    inset 0 0 12px rgba(255, 255, 255, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.4);
-  text-shadow: 0 0 10px rgba(200, 245, 255, 0.6);
+    0 0 18px rgba(255, 255, 255, 0.28),
+    inset 0 0 12px rgba(255, 255, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.45);
 }
 
 .pill-btn-primary:hover {
-  background: linear-gradient(90deg, rgba(125, 211, 252, 0.5), rgba(165, 230, 255, 0.6));
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.23), rgba(255, 255, 255, 0.36));
   color: #ffffff;
   box-shadow:
-    0 0 28px rgba(125, 211, 252, 0.75),
-    inset 0 0 16px rgba(255, 255, 255, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    0 0 28px rgba(255, 255, 255, 0.42),
+    inset 0 0 16px rgba(255, 255, 255, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
   transform: translateY(-1px);
 }
 
