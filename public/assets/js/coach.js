@@ -517,26 +517,90 @@ const Microphones = (() => {
   }
 
   /**
-   * Open the chosen device and keep it open. No-op when the detective
-   * hasn't picked one — then the browser default is exactly what's
-   * wanted and grabbing a stream would only add a second claim on it.
+   * Open an input and keep it open for the whole session.
+   *
+   * This has two jobs, and the second one is why it runs even when no
+   * particular device has been chosen.
+   *
+   * The first is steering: claiming the chosen device usually makes the
+   * recogniser attach to it. See the note above for how much that
+   * promises.
+   *
+   * The second is holding the input open *continuously*. A Bluetooth
+   * headset has two profiles — a high quality one for playback, and a
+   * hands-free one, mono and quieter, that it switches to when the
+   * microphone is in use. The operating system picks between them by
+   * whether anything is capturing, so every time capture starts or
+   * stops the headset renegotiates and what's playing audibly changes
+   * character. The recogniser is torn down at the start of every turn,
+   * which put one of those renegotiations right in the middle of
+   * Claude's reply: it began in one profile and finished in the other.
+   * That is what "the volume drops a few seconds in" was, and it only
+   * happens on Bluetooth — the same reply through laptop speakers is
+   * level throughout.
+   *
+   * So the page keeps its own claim on the microphone from the moment
+   * the session opens until it closes, independent of the recogniser
+   * coming and going underneath it. Capture never stops mid-session, so
+   * there is never a renegotiation to hear. `mute` covers not listening
+   * without letting go.
+   *
+   * The cost is honest and worth naming: the headset stays in its
+   * hands-free profile for the whole session, so Claude's voice is that
+   * profile's quality throughout rather than being better for part of a
+   * reply and worse for the rest. Consistent is the thing worth having
+   * here — a level voice is easy to listen to, one that changes halfway
+   * through a sentence is not. The microphone indicator also stays lit
+   * while Claude talks, which is honest: the page really is holding the
+   * microphone, it just isn't listening through it.
    */
   async function hold() {
     release();
-    const id = chosen();
-    if (!id || !supported()) {
+    if (!supported()) {
       return false;
     }
+
+    const id = chosen();
     try {
-      held = await media.getUserMedia({ audio: { deviceId: { exact: id } } });
+      held = await media.getUserMedia({ audio: id ? { deviceId: { exact: id } } : true });
       return true;
     } catch (err) {
-      // Unplugged since it was chosen, most likely. The recogniser still
-      // runs on the default, which beats refusing to listen at all.
-      console.warn("Chosen microphone unavailable:", err.message);
+      if (id) {
+        // Unplugged since it was chosen, most likely. Fall back to the
+        // default rather than giving up the claim — holding *some*
+        // input open is what keeps the headset from renegotiating, and
+        // it matters more than holding the preferred one.
+        console.warn("Chosen microphone unavailable:", err.message);
+        return holdDefault();
+      }
       held = null;
       return false;
     }
+  }
+
+  async function holdDefault() {
+    try {
+      held = await media.getUserMedia({ audio: true });
+      return true;
+    } catch (err) {
+      held = null;
+      return false;
+    }
+  }
+
+  /**
+   * Stop listening through the held input without letting go of it.
+   *
+   * A disabled track delivers silence but stays live, so the device is
+   * still claimed and the headset has no reason to change profile. This
+   * is the difference between "not listening" and "not holding the
+   * microphone", which used to be the same thing and shouldn't be.
+   */
+  function mute(quiet) {
+    if (!held) return;
+    held.getAudioTracks().forEach((track) => {
+      track.enabled = !quiet;
+    });
   }
 
   function release() {
@@ -552,7 +616,7 @@ const Microphones = (() => {
     }
   }
 
-  return { supported, list, chosen, choose, hold, release, onChange };
+  return { supported, list, chosen, choose, hold, mute, release, onChange };
 })();
 
 /**
@@ -714,6 +778,11 @@ const Voice = (() => {
   function endTurn() {
     clearTimeout(session.silence);
     quiet();
+    // Muted, not released. The recogniser is gone for the length of the
+    // reply but the page keeps the microphone — see Microphones.hold
+    // for why letting go here made Claude's voice change character
+    // partway through on a Bluetooth headset.
+    Microphones.mute(true);
     Speaker.stop();
     session.queue = "";
     session.speaking = false;
@@ -834,6 +903,9 @@ const Voice = (() => {
     };
 
     session.recogniser = recogniser;
+    // The candidate's turn: listening through the input the session has
+    // been holding all along.
+    Microphones.mute(false);
     setState("listening");
     try {
       recogniser.start();
