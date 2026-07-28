@@ -26,14 +26,58 @@
 
 * { box-sizing: border-box; }
 
-/* Consistent glowing semi-transparent scrollbars site-wide */
-body::-webkit-scrollbar,
-html::-webkit-scrollbar {
-  width: 12px;
+/* ============================================================
+   Scrollbars — one recipe, every scrolling surface
+   ============================================================
+   Written once and applied by selector list rather than copied
+   per component. It had been pasted into five places and had
+   already drifted in four ways: the page bar was 12px and the
+   rest 10px, the modal dropped the hover glow, the newer inner
+   panels used a thinner 8px bar with a single flat shadow and
+   an invisible track, and track margins ran 0 / 8 / 16px.
+   None of that was deliberate — it's what copy-paste does over
+   time, and the only fix that stays fixed is having one copy.
+
+   Add a scrolling element to this list and it matches the rest
+   by construction. The one intentional exception is
+   .practice-input, which hides its bar entirely; it's absent
+   here and says why at its own definition.
+
+   scrollbar-color is for Firefox, which ignores ::-webkit-*
+   pseudo-elements. It can't do the glow, but it can at least
+   get the palette rather than falling back to grey.
+   ============================================================ */
+
+html, body,
+.log-table-scroll,
+.modal-scroll,
+.chat-log,
+.preview-body,
+.orb-caption,
+.mic-list {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200, 245, 255, 0.4) rgba(255, 255, 255, 0.04);
 }
 
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+.log-table-scroll::-webkit-scrollbar,
+.modal-scroll::-webkit-scrollbar,
+.chat-log::-webkit-scrollbar,
+.preview-body::-webkit-scrollbar,
+.orb-caption::-webkit-scrollbar,
+.mic-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+html::-webkit-scrollbar-thumb,
 body::-webkit-scrollbar-thumb,
-html::-webkit-scrollbar-thumb {
+.log-table-scroll::-webkit-scrollbar-thumb,
+.modal-scroll::-webkit-scrollbar-thumb,
+.chat-log::-webkit-scrollbar-thumb,
+.preview-body::-webkit-scrollbar-thumb,
+.orb-caption::-webkit-scrollbar-thumb,
+.mic-list::-webkit-scrollbar-thumb {
   background: rgba(200, 245, 255, 0.4);
   border-radius: 999px;
   box-shadow:
@@ -44,8 +88,14 @@ html::-webkit-scrollbar-thumb {
     inset 0 0 3px rgba(255, 255, 255, 1);
 }
 
+html::-webkit-scrollbar-thumb:hover,
 body::-webkit-scrollbar-thumb:hover,
-html::-webkit-scrollbar-thumb:hover {
+.log-table-scroll::-webkit-scrollbar-thumb:hover,
+.modal-scroll::-webkit-scrollbar-thumb:hover,
+.chat-log::-webkit-scrollbar-thumb:hover,
+.preview-body::-webkit-scrollbar-thumb:hover,
+.orb-caption::-webkit-scrollbar-thumb:hover,
+.mic-list::-webkit-scrollbar-thumb:hover {
   background: rgba(220, 250, 255, 0.55);
   box-shadow:
     0 0 8px rgba(255, 255, 255, 1),
@@ -54,9 +104,17 @@ html::-webkit-scrollbar-thumb:hover {
     inset 0 0 10px rgba(255, 255, 255, 1);
 }
 
+html::-webkit-scrollbar-track,
 body::-webkit-scrollbar-track,
-html::-webkit-scrollbar-track {
-  background: rgba(255,255,255,0.03);
+.log-table-scroll::-webkit-scrollbar-track,
+.modal-scroll::-webkit-scrollbar-track,
+.chat-log::-webkit-scrollbar-track,
+.preview-body::-webkit-scrollbar-track,
+.orb-caption::-webkit-scrollbar-track,
+.mic-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+  margin: 8px 0;
 }
 
 html, body {
@@ -559,36 +617,6 @@ main {
   border-radius: 16px;
 }
 
-.log-table-scroll::-webkit-scrollbar {
-  width: 10px;
-}
-
-.log-table-scroll::-webkit-scrollbar-thumb {
-  background: rgba(200, 245, 255, 0.4);
-  border-radius: 999px;
-  box-shadow:
-    0 0 6px rgba(255, 255, 255, 0.9),
-    0 0 16px rgba(165, 230, 255, 0.9),
-    0 0 26px rgba(125, 211, 252, 0.8),
-    inset 0 0 8px rgba(255, 255, 255, 0.9),
-    inset 0 0 3px rgba(255, 255, 255, 1);
-}
-
-.log-table-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(220, 250, 255, 0.55);
-  box-shadow:
-    0 0 8px rgba(255, 255, 255, 1),
-    0 0 22px rgba(165, 230, 255, 1),
-    0 0 34px rgba(125, 211, 252, 0.9),
-    inset 0 0 10px rgba(255, 255, 255, 1);
-}
-
-.log-table-scroll::-webkit-scrollbar-track {
-  background: rgba(255,255,255,0.04);
-  border-radius: 999px;
-  margin: 8px 0;
-}
-
 .log-table {
   width: 100%;
   border-collapse: collapse;
@@ -774,31 +802,6 @@ main {
   max-height: 85vh;
   overflow-y: auto;
   padding: 32px;
-}
-
-.modal-scroll::-webkit-scrollbar {
-  width: 10px;
-}
-
-.modal-scroll::-webkit-scrollbar-thumb {
-  background: rgba(200, 245, 255, 0.4);
-  border-radius: 999px;
-  box-shadow:
-    0 0 6px rgba(255, 255, 255, 0.9),
-    0 0 16px rgba(165, 230, 255, 0.9),
-    0 0 26px rgba(125, 211, 252, 0.8),
-    inset 0 0 8px rgba(255, 255, 255, 0.9),
-    inset 0 0 3px rgba(255, 255, 255, 1);
-}
-
-.modal-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(220, 250, 255, 0.55);
-}
-
-.modal-scroll::-webkit-scrollbar-track {
-  background: rgba(255,255,255,0.04);
-  border-radius: 999px;
-  margin: 16px 0;
 }
 
 .modal-close {
@@ -1266,16 +1269,6 @@ main {
   padding-right: 6px;
 }
 
-.chat-log::-webkit-scrollbar { width: 8px; }
-
-.chat-log::-webkit-scrollbar-thumb {
-  background: rgba(200, 245, 255, 0.35);
-  border-radius: 999px;
-  box-shadow: 0 0 8px rgba(165, 230, 255, 0.7);
-}
-
-.chat-log::-webkit-scrollbar-track { background: transparent; }
-
 .chat-row { display: flex; }
 .chat-row.chat-user { justify-content: flex-end; }
 .chat-row.chat-hint { justify-content: center; }
@@ -1410,16 +1403,6 @@ main {
   mask-image: none;
 }
 
-.composer-preview.expanded .preview-body::-webkit-scrollbar { width: 8px; }
-
-.composer-preview.expanded .preview-body::-webkit-scrollbar-thumb {
-  background: rgba(200, 245, 255, 0.35);
-  border-radius: 999px;
-  box-shadow: 0 0 8px rgba(165, 230, 255, 0.6);
-}
-
-.composer-preview.expanded .preview-body::-webkit-scrollbar-track { background: transparent; }
-
 .practice-composer[hidden] { display: none; }
 
 /* The preview and the box below it are one unit, so they sit closer to
@@ -1532,16 +1515,6 @@ main {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-
-.mic-list::-webkit-scrollbar { width: 8px; }
-
-.mic-list::-webkit-scrollbar-thumb {
-  background: rgba(200, 245, 255, 0.35);
-  border-radius: 999px;
-  box-shadow: 0 0 8px rgba(165, 230, 255, 0.6);
-}
-
-.mic-list::-webkit-scrollbar-track { background: transparent; }
 
 .mic-option {
   display: flex;
