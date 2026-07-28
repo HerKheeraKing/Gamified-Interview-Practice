@@ -2343,14 +2343,33 @@ main {
    on this orb means "listening to you"; when Claude is the one talking
    it switches to the same pastel green as the mic-active state, so the
    colour itself (not just the label word) says who has the floor. */
+/* The green is a hue swap and nothing else. Every alpha, blur, stop
+   position and offset below is the cyan recipe's own number, because the
+   two states are the same piece of glass lit differently — and the green
+   had drifted into being a different, harder material: a halo at full
+   opacity instead of 0.55, a rim at 0.75 instead of 0.38, and a handful
+   of alphas each nudged up by four or five hundredths. Individually
+   invisible; together they read as saturated and sharp-edged next to the
+   cyan, which is exactly what they were.
+
+   The rim colour mattered as much as its alpha. Cyan's edge is
+   rgba(200,245,255) — the accent lightened most of the way to white,
+   which is why it reads as a soft highlight rather than a drawn line.
+   The green was ringing itself in near-full-strength green. It gets the
+   same treatment now: base 167,243,208, soft 182,245,205, rim
+   214,252,232, filling the same three roles at the same three strengths
+   as 125,211,252 / 165,230,255 / 200,245,255 do for cyan.
+
+   Presence is what separates speaking from idle, and it comes from the
+   speech-driven glow rather than from baked-in alphas. */
 .orb[data-state="speaking"] .orb-halo {
-  opacity: 1;
+  opacity: 0.85;
   animation: orb-swell 0.85s ease-in-out infinite;
-  background: radial-gradient(circle at 50% 50%, rgba(167, 243, 208, 0.45) 0%, rgba(167, 243, 208, 0) 68%);
+  background: radial-gradient(circle at 50% 50%, rgba(167, 243, 208, 0.4) 0%, rgba(167, 243, 208, 0) 68%);
 }
 .orb[data-state="speaking"] .orb-core {
   animation: orb-talk 0.62s ease-in-out infinite;
-  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.95) 0%, rgba(182, 245, 205, 0.75) 42%, rgba(167, 243, 208, 0) 74%);
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.95) 0%, rgba(182, 245, 205, 0.7) 42%, rgba(167, 243, 208, 0) 74%);
 }
 
 /* Once the speech itself is driving the glow, the loops above have to
@@ -2379,12 +2398,12 @@ main {
 .orb[data-state="speaking"] .orb-glass {
   background:
     radial-gradient(circle at 33% 27%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.06) 26%, rgba(255, 255, 255, 0) 46%),
-    radial-gradient(circle at 50% 50%, rgba(167, 243, 208, 0.2) 0%, rgba(23, 21, 43, 0.32) 72%);
-  border-color: rgba(182, 245, 205, 0.75);
+    radial-gradient(circle at 50% 50%, rgba(167, 243, 208, 0.16) 0%, rgba(23, 21, 43, 0.32) 72%);
+  border-color: rgba(214, 252, 232, 0.38);
   box-shadow:
     inset 0 2px 14px rgba(255, 255, 255, 0.22),
-    inset 0 -10px 22px rgba(167, 243, 208, 0.28),
-    0 0 30px rgba(167, 243, 208, 0.4);
+    inset 0 -10px 22px rgba(167, 243, 208, 0.22),
+    0 0 30px rgba(167, 243, 208, 0.35);
 }
 
 @keyframes orb-breathe {

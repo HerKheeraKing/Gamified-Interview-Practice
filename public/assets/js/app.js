@@ -1328,7 +1328,13 @@ const Practice = (() => {
       orb.dataset.pulse = "speech";
 
       core.style.transform = wobble(0.88 + shown * 0.42, warp, seconds * AXIS_DPS);
-      core.style.opacity = (0.42 + shown * 0.58).toFixed(4);
+      // Ceilings kept inside the range the cyan states use — cyan's core
+      // rests at 0.6 and its halo peaks at 0.85. Driving these to a flat
+      // 1.0 was most of what made the green read as a harsher material
+      // than the blue: same gradients, but lit past anything the rest of
+      // the orb ever reaches. The travel is what carries the speech; the
+      // brightness only has to say "this one is talking".
+      core.style.opacity = (0.34 + shown * 0.44).toFixed(4);
 
       if (glass) {
         // Least of the three. This is the sphere the eye reads as the
@@ -1339,7 +1345,7 @@ const Practice = (() => {
 
       if (halo) {
         halo.style.transform = wobble(1.24 + shown * 0.34, warp * 0.8, 40 + seconds * AXIS_DPS * 0.61);
-        halo.style.opacity = (0.5 + shown * 0.5).toFixed(4);
+        halo.style.opacity = (0.34 + shown * 0.46).toFixed(4);
       }
     }
 
