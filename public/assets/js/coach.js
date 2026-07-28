@@ -340,7 +340,13 @@ const Speaker = (() => {
       let done = false;
       let sawBoundary = false;
       let pacer = null;
-      const words = (text.match(/\S+/g) || []).length;
+      // The words themselves, not just how many. A beat carries the word
+      // it belongs to so the orb can weigh a long word differently from
+      // a short one and ease off at a clause end — rhythm the caller can
+      // only get from the text, and only while it is being spoken.
+      const wordList = [...text.matchAll(/\S+/g)];
+      const words = wordList.length;
+      let paced = 0;
 
       const finish = () => {
         if (done) return;
@@ -372,8 +378,12 @@ const Speaker = (() => {
         sawBoundary = true;
         clearInterval(pacer);
         pacer = null;
-        handlers.beat();
         const length = event.charLength || 0;
+        // charLength is optional and some engines send 0. The word list
+        // already knows where every word starts, so it can answer when
+        // the event won't.
+        const at = wordList.find((w) => w.index === event.charIndex);
+        handlers.beat(length > 0 ? text.substr(event.charIndex, length) : (at ? at[0] : ""));
         handlers.spoken(text.slice(0, event.charIndex + length));
       };
 
@@ -406,7 +416,13 @@ const Speaker = (() => {
         const interval = Math.min(600, Math.max(180, 1000 / observedWps));
         pacer = setInterval(() => {
           if (done) return;
-          handlers.beat();
+          // Walks the real words in order, so even a paced beat says
+          // which word it stands for. Past the end it keeps time without
+          // claiming a word — the utterance is nearly over by then, and
+          // a wrong word is worse than none.
+          const word = paced < wordList.length ? wordList[paced][0] : "";
+          paced += 1;
+          handlers.beat(word);
         }, interval);
       }
       utterance.onend = finish;
@@ -1356,9 +1372,9 @@ const Voice = (() => {
           // speaker at the same volume because they are all handed the
           // same one, and `say` never chooses over the top of it.
           voice: session.voice,
-          beat() {
+          beat(word) {
             if (!session || session.turn !== turn) return;
-            session.on.beat();
+            session.on.beat(word);
           },
           spoken(prefix) {
             if (!session || session.turn !== turn) return;

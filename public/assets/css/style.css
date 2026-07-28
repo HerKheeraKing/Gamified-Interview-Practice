@@ -2353,12 +2353,18 @@ main {
   background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.95) 0%, rgba(182, 245, 205, 0.75) 42%, rgba(167, 243, 208, 0) 74%);
 }
 
-/* Once the speech itself is driving the pulse, the loop above has to get
-   out of the way — two animations on one transform is a fight, not a
-   blend. Kept as the default rather than the exception: the attribute is
-   only set once a real beat has arrived, so an engine that reports
-   nothing still gets a living orb instead of a still one. */
-.orb[data-state="speaking"][data-pulse="speech"] .orb-core {
+/* Once the speech itself is driving the glow, the loops above have to
+   get out of the way — and not only because two animations on one
+   transform is a fight rather than a blend. A running CSS animation
+   outranks an inline style, so leaving these on would not have looked
+   like a conflict at all: the JS would have written a transform every
+   frame and none of them would ever have been drawn.
+
+   Kept as the default rather than the exception: the attribute is only
+   set once a real beat has arrived, so an engine that reports nothing
+   still gets a living orb instead of a still one. */
+.orb[data-state="speaking"][data-pulse="speech"] .orb-core,
+.orb[data-state="speaking"][data-pulse="speech"] .orb-halo {
   animation: none;
 }
 .orb[data-state="speaking"] .orb-glass {

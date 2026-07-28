@@ -1071,8 +1071,8 @@ const Practice = (() => {
       said(text) {
         setOrb(null, null, text);
       },
-      beat() {
-        pulseOrb();
+      beat(word) {
+        pulseOrb(word);
       },
       grades(scores) {
         ScoreModal.applyGrades(scores);
@@ -1154,56 +1154,172 @@ const Practice = (() => {
   };
 
   /**
-   * One pulse of the orb, for one word actually spoken.
+   * The orb's glow while Claude is speaking.
    *
-   * The speaking orb used to run a fixed 0.62s CSS loop, which is a
-   * plausible rhythm and never once the rhythm of the sentence being
-   * read — it ran at the same tempo through a clipped three-word answer
-   * and a long slow explanation, and kept running through the gaps
-   * between utterances. Driving it from the speech makes the orb agree
-   * with the ears.
+   * Words are the input, not the output. Firing one animation per word
+   * put the timing on screen literally and it read as a strobe — speech
+   * runs at two or three words a second, which is well inside the range
+   * the eye reports as flicker rather than rhythm. The signal was right
+   * and the rendering of it was wrong.
    *
-   * Every beat is one animation, started when the word starts and left
-   * to finish on its own, so beats arriving faster than they can play
-   * simply overlap. Nothing needs cancelling and there is no loop to
-   * keep in phase.
+   * So words feed a level instead of drawing a frame. Each one adds a
+   * small amount of energy, that energy bleeds away continuously, and
+   * what is drawn chases the result rather than tracking it — the two
+   * time constants are long enough that per-word ripple is averaged out
+   * before it reaches the screen. What survives is the shape at the
+   * scale speech actually has one: the glow builds through a phrase,
+   * eases at a comma, sags in the breath between sentences, and falls
+   * away when the voice stops.
    *
-   * `data-pulse` is what silences the CSS loop, and it is set here — on
-   * the first beat — rather than when speech begins. If beats never
-   * arrive, because the engine reports nothing and the pacer is off or
-   * Web Animations is missing, the old loop is still running and the orb
-   * still looks alive. The fallback is the default; this replaces it
-   * only once there is something better to show.
+   * Falling is slower than rising, because that is how light and breath
+   * both behave, and a symmetric envelope reads as mechanical.
    */
-  function pulseOrb() {
-    const orb = document.getElementById("orb");
-    const core = orb.querySelector(".orb-core");
-    if (!core || typeof core.animate !== "function") return;
-    // Motion is the whole of this effect, so honouring the preference
-    // means not running it at all. The CSS loop is already suppressed
-    // for these users by the same query.
-    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const OrbGlow = (() => {
+    // How long the accumulated energy takes to bleed away, and how
+    // quickly the drawn level chases it. RISE/FALL are deliberately far
+    // longer than the ~380ms between words: that gap is what turns a
+    // string of discrete words into one continuous swell.
+    const DECAY_MS = 1100;
+    const RISE_MS = 320;
+    const FALL_MS = 800;
 
-    orb.dataset.pulse = "speech";
-    core.animate(
-      [
-        { opacity: 0.72, transform: "scale(0.94)" },
-        { opacity: 1, transform: "scale(1.13)", offset: 0.3 },
-        { opacity: 0.72, transform: "scale(0.94)" },
-      ],
-      { duration: 340, easing: "ease-out" }
-    );
+    /**
+     * How far a word closes the gap to full, before its length counts.
+     *
+     * A word closes a fraction of what's left rather than adding a fixed
+     * amount, which is what keeps the level bounded no matter how fast
+     * the voice is. Adding did not: energy accumulated faster than it
+     * decayed, so any clause longer than a few words pinned the glow at
+     * maximum and the only visible movement left was the pauses. A
+     * quick voice should read as brighter than a slow one, not as
+     * permanently saturated.
+     */
+    const ATTACK = 0.38;
+
+    // A clause end is a real pause in the speech, so it is a real dip in
+    // the light. This is the one place a single word moves the level on
+    // its own, and it moves it down.
+    const CLAUSE = /[,.;:!?—]$/;
+    const CLAUSE_RELEASE = 0.55;
+
+    // Steady speech settles somewhere around 0.4–0.65 depending on how
+    // fast the voice is, so the drawn value is scaled to use the range
+    // the eye is actually given. Headroom above it is deliberate: it is
+    // what a dense run of long words has left to climb into.
+    const GAIN = 1.1;
+
+    let energy = 0;
+    let level = 0;
+    let last = 0;
+    let frame = null;
+
+    /** One word spoken. Adds energy; never draws anything itself. */
+    function beat(word) {
+      const text = typeof word === "string" ? word : "";
+      // Longer words hold the voice longer, so they pull harder.
+      const attack = ATTACK + Math.min(0.16, text.length * 0.016);
+      energy += (1 - energy) * attack;
+      if (CLAUSE.test(text)) {
+        energy *= CLAUSE_RELEASE;
+      }
+      start();
+    }
+
+    /**
+     * Advance the model to `now` and return what should be drawn.
+     *
+     * Pure apart from the two counters it carries, and time is a
+     * parameter rather than something it reads — which is what makes the
+     * envelope testable without a browser or a clock.
+     */
+    function advance(now) {
+      const dt = Math.min(120, now - last);
+      last = now;
+      energy *= Math.exp(-dt / DECAY_MS);
+      const tau = energy > level ? RISE_MS : FALL_MS;
+      level += (energy - level) * (1 - Math.exp(-dt / tau));
+      return Math.min(1, level * GAIN);
+    }
+
+    function start() {
+      if (frame !== null) return;
+      last = performance.now();
+      frame = requestAnimationFrame(tick);
+    }
+
+    function tick(now) {
+      const shown = advance(now);
+      paint(shown);
+      // Runs on while there is anything left to show, so the glow fades
+      // out on its own after the last word instead of being cut.
+      if (level > 0.002 || energy > 0.002) {
+        frame = requestAnimationFrame(tick);
+        return;
+      }
+      frame = null;
+      release();
+    }
+
+    function paint(shown) {
+      const orb = document.getElementById("orb");
+      const core = orb && orb.querySelector(".orb-core");
+      const halo = orb && orb.querySelector(".orb-halo");
+      if (!core) return;
+
+      orb.dataset.pulse = "speech";
+      core.style.transform = `scale(${(0.92 + shown * 0.28).toFixed(4)})`;
+      core.style.opacity = (0.55 + shown * 0.45).toFixed(4);
+      if (halo) {
+        halo.style.transform = `scale(${(1.28 + shown * 0.24).toFixed(4)})`;
+      }
+    }
+
+    /** Hand the orb back to CSS, leaving nothing inline behind. */
+    function release() {
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+        frame = null;
+      }
+      energy = 0;
+      level = 0;
+      const orb = document.getElementById("orb");
+      if (!orb) return;
+      delete orb.dataset.pulse;
+      [".orb-core", ".orb-halo"].forEach((sel) => {
+        const el = orb.querySelector(sel);
+        if (!el) return;
+        el.style.transform = "";
+        el.style.opacity = "";
+      });
+    }
+
+    return { beat, release, advance };
+  })();
+
+  /**
+   * One word, handed to the glow.
+   *
+   * Motion is the whole of this effect, so honouring reduced-motion
+   * means not running it at all rather than running it gently. The CSS
+   * fallback loop is suppressed for those users by the same query, and
+   * `data-pulse` is never set, so nothing here leaves the orb stranded.
+   */
+  function pulseOrb(word) {
+    if (typeof requestAnimationFrame !== "function") return;
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    OrbGlow.beat(word);
   }
 
   /** Null for state or caption means "leave that one alone". */
   function setOrb(state, label, caption) {
     if (state !== null) {
       document.getElementById("orb").dataset.state = state;
-      // The driven pulse belongs to one stretch of speech. Handing the
-      // orb back to CSS at every state change is what stops a finished
-      // reply leaving it frozen mid-scale until the next word arrives.
+      // The glow belongs to one stretch of speech. Releasing it at every
+      // state change is what stops a finished reply leaving the orb
+      // frozen at whatever brightness the last word left it, and clears
+      // the inline styles so the CSS states can take the orb back.
       if (state !== "speaking") {
-        delete document.getElementById("orb").dataset.pulse;
+        OrbGlow.release();
       }
       // The label sits beside the orb, not inside it, so it can't pick
       // up the state through descendant CSS — it needs its own copy to
