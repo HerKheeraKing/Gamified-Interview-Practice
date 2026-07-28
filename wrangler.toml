@@ -14,11 +14,7 @@ compatibility_date = "2026-07-27"
 directory = "./public"
 binding = "ASSETS"
 
-# Copy this file to wrangler.toml and paste in your own database id:
-#   cp wrangler.toml.example wrangler.toml
-#   npx wrangler d1 create interview-case-files
-# wrangler.toml itself is gitignored so the id stays out of the repo.
 [[d1_databases]]
 binding = "DB"
 database_name = "interview-case-files"
-database_id = "YOUR_D1_DATABASE_ID_HERE"
+database_id = "de7dfe1a-f7ac-4273-8607-e5691b6d6389"

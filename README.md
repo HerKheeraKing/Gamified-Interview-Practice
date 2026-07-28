@@ -76,15 +76,10 @@ module and nothing else.
 
 ```bash
 npm install
-cp wrangler.toml.example wrangler.toml         # wrangler.toml is gitignored
-npx wrangler d1 create interview-case-files    # paste the id into wrangler.toml
+npx wrangler d1 create interview-case-files   # paste database_id into wrangler.toml
 npm run db:init          # create tables locally
 npm run db:init:remote   # create tables on Cloudflare
 ```
-
-`wrangler.toml` is not tracked — it holds your own `database_id`. Commit
-changes to `wrangler.toml.example` instead, so config edits still get
-shared without the id going with them.
 
 ### Local dev
 
