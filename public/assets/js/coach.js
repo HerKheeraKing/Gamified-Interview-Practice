@@ -329,11 +329,15 @@ const Speaker = (() => {
    * answered yet, and memoising the guess would make the wrong answer
    * permanent instead of momentary.
    *
-   * Local voices are preferred over remote ones. A remote voice is
-   * synthesised on a server and fetched per utterance, so its volume
-   * and quality vary with the network and every seam risks a stall; a
-   * local voice sounds identical every time it opens its mouth, which
-   * is the whole point of this function.
+   * The ranking is by character, not by where the voice runs. The
+   * preferred voice is remote — synthesised on a server and fetched per
+   * utterance — which is a real cost: it needs the network, and two
+   * utterances are two separate fetches that need not come back at the
+   * same loudness. That cost is accepted deliberately, because this
+   * voice is the one the site is meant to sound like. Consistency
+   * within a reply is bought by pinning the choice here and by handing
+   * the synthesiser as few utterances as possible, not by picking a
+   * voice nobody chose.
    */
   function voice() {
     if (chosen) return chosen;
@@ -342,11 +346,8 @@ const Speaker = (() => {
     const english = engine.getVoices().filter((v) => v.lang && v.lang.startsWith("en"));
     if (english.length === 0) return null;
 
-    const liked = ["Samantha", "Microsoft Aria", "Microsoft Zira", "Google UK English Female"];
-    const local = english.filter((v) => v.localService);
-
-    chosen =
-      byName(local, liked) || byName(english, liked) || local[0] || english[0] || null;
+    const liked = ["Google UK English Female", "Samantha", "Microsoft Aria", "Microsoft Zira"];
+    chosen = byName(english, liked) || english[0] || null;
     return chosen;
   }
 
