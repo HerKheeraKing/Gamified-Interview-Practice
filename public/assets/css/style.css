@@ -168,7 +168,25 @@ html, body {
 
 /* ---------------- Header ---------------- */
 
+/* The header sticks, but the frosted glass behind it is a separate
+ * layer — and that separation is the whole point.
+ *
+ * WebKit resolves `backdrop-filter` against a "backdrop root", and
+ * putting the filter on the sticky element itself makes that element
+ * both the thing being offset by the compositor and the thing defining
+ * the backdrop root. iPad Safari resolves that conflict by dropping the
+ * sticky offset: the bar scrolls away with the page instead of pinning.
+ * Desktop Safari and Chromium happen to get it right, which is why this
+ * only ever showed up on the iPad.
+ *
+ * Moving the blur to a ::before means the sticky element carries no
+ * filter of its own, so it composites as a plain box and pins reliably.
+ * The pseudo-element inherits the header's position, so the glass still
+ * travels with it and the result is pixel-identical everywhere else.
+ */
 .site-header {
+  position: -webkit-sticky; /* iPadOS 12 and earlier — must precede the
+                               unprefixed value so newer Safari wins. */
   position: sticky;
   top: 0;
   z-index: 20;
@@ -176,10 +194,25 @@ html, body {
   justify-content: space-between;
   align-items: center;
   padding: 20px 48px;
+  /* Standalone/home-screen mode puts the status bar over the header.
+     max() keeps the normal 20px in every other case. */
+  padding-top: max(20px, env(safe-area-inset-top));
+  background: transparent;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  /* Keeps the ::before's negative z-index inside the header rather than
+     letting it fall behind the page background. */
+  isolation: isolate;
+}
+
+.site-header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
   background: rgba(6, 5, 13, 0.72);
   backdrop-filter: blur(18px) saturate(120%);
   -webkit-backdrop-filter: blur(18px) saturate(120%);
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  pointer-events: none;
 }
 
 .brand {
@@ -984,6 +1017,9 @@ main {
   .hero h1 { font-size: 38px; }
   .site-header {
     padding: 14px 16px;
+    /* Mirrors the safe-area guard from the base rule; the shorthand
+       above would otherwise reset it back to a flat 14px. */
+    padding-top: max(14px, env(safe-area-inset-top));
     flex-direction: row;
     justify-content: space-between;
     gap: 8px;
