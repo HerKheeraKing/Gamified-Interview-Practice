@@ -18,6 +18,7 @@
   --text-faint: #6b6680;
   --danger: #f2789a;
   --success: #8ce8b0;
+  --success-soft: #b6f5cd;
 
   --font-serif: "Playfair Display", Georgia, serif;
   --font-sans: "Inter", system-ui, sans-serif;
@@ -1322,8 +1323,12 @@ main {
 
 .practice-composer[hidden] { display: none; }
 
+/* flex-end, not stretch: the field grows upward as the answer wraps, and
+   the two buttons stay pinned to its last line rather than stretching
+   into tall slabs beside a five-line paragraph. */
 .practice-composer:not([hidden]) {
   display: flex;
+  align-items: flex-end;
   gap: 10px;
   margin-top: 18px;
 }
@@ -1331,16 +1336,35 @@ main {
 .practice-input {
   flex: 1;
   min-width: 0;
+  display: block;
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 999px;
-  padding: 11px 16px;
+  border-radius: 18px;
+  padding: 10px 16px;
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 13px;
+  line-height: 1.5;
   outline: none;
-  transition: all 0.18s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+
+  /* Height is set from scrollHeight in JS on every change. The cap and
+     the scrollbar are here so a very long answer stops eating the modal
+     instead of growing without limit; `resize: none` because the handle
+     would fight the automatic sizing. */
+  resize: none;
+  overflow-y: auto;
+  max-height: 132px;
 }
+
+.practice-input::-webkit-scrollbar { width: 8px; }
+
+.practice-input::-webkit-scrollbar-thumb {
+  background: rgba(200, 245, 255, 0.3);
+  border-radius: 999px;
+}
+
+.practice-input::-webkit-scrollbar-track { background: transparent; }
 
 .practice-input::placeholder { color: var(--text-faint); }
 
@@ -1350,8 +1374,14 @@ main {
 }
 
 /* Dictation toggle. Quiet by default — it's a shortcut, not the primary
-   action — and it borrows the orb's coral-free cyan pulse while running
-   so "the microphone is live" reads the same everywhere on the site. */
+   action.
+
+   Pastel green while running, deliberately not the site's cyan. Cyan
+   means "Claude is in the conversation" (the orb, the send button, the
+   panel itself); this microphone only fills a text box and nothing is
+   listening on the other end, so it gets its own colour rather than
+   borrowing the one that promises a reply. Kept pale — a saturated
+   green would read as a status light on a dark plum panel. */
 .mic-btn {
   flex: 0 0 auto;
   display: inline-flex;
@@ -1376,21 +1406,21 @@ main {
 }
 
 .mic-btn.recording {
-  border-color: rgba(200, 245, 255, 0.75);
-  background: rgba(125, 211, 252, 0.18);
-  color: #eaf9ff;
+  border-color: rgba(182, 245, 205, 0.75);
+  background: rgba(167, 243, 208, 0.18);
+  color: var(--success-soft);
   animation: mic-pulse 1.5s ease-in-out infinite;
 }
 
 @keyframes mic-pulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(125, 211, 252, 0.35); }
-  50%      { box-shadow: 0 0 18px rgba(125, 211, 252, 0.8); }
+  0%, 100% { box-shadow: 0 0 8px rgba(167, 243, 208, 0.35); }
+  50%      { box-shadow: 0 0 18px rgba(167, 243, 208, 0.75); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .mic-btn.recording {
     animation: none;
-    box-shadow: 0 0 14px rgba(125, 211, 252, 0.6);
+    box-shadow: 0 0 14px rgba(167, 243, 208, 0.6);
   }
 }
 

@@ -501,8 +501,17 @@ const Practice = (() => {
     });
 
     document.getElementById("practice-send").addEventListener("click", send);
-    document.getElementById("practice-input").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") send();
+
+    const input = document.getElementById("practice-input");
+    input.addEventListener("input", fitInput);
+    input.addEventListener("keydown", (e) => {
+      // Enter sends, as it did when this was a single-line field.
+      // Shift+Enter is the escape hatch now that a line break is
+      // something the box can actually hold.
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
     });
 
     document.getElementById("practice-mic").addEventListener("click", toggleDictation);
@@ -522,6 +531,7 @@ const Practice = (() => {
     document.getElementById("practice-panel").hidden = true;
     document.getElementById("chat-log").innerHTML = "";
     document.getElementById("practice-input").value = "";
+    fitInput();
     document.getElementById("handoff-status").textContent = "";
     document.querySelectorAll(".practice-mode").forEach((b) => b.classList.remove("active"));
   }
@@ -604,6 +614,24 @@ const Practice = (() => {
     element.hidden = !message;
   }
 
+  /**
+   * Match the answer box's height to its contents.
+   *
+   * Called from the `input` event and from everywhere the value is set
+   * in code — dictation rewriting the transcript, send() clearing it,
+   * reset() emptying it. Programmatic assignment doesn't fire `input`,
+   * so a box filled by the microphone would otherwise stay one line
+   * tall and hide the very text the mic button exists to produce.
+   *
+   * Collapsing to `auto` first is what allows it to shrink again; read
+   * against a fixed height, scrollHeight can only ever grow.
+   */
+  function fitInput() {
+    const input = document.getElementById("practice-input");
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight}px`;
+  }
+
   /* ---- text mode ---- */
 
   function send() {
@@ -622,6 +650,7 @@ const Practice = (() => {
     if (mode === "voice") {
       if (Voice.submit(said)) {
         input.value = "";
+        fitInput();
       } else {
         note(openingNote() || "Live Voice needs a browser with a speech engine — try Chrome or Edge.");
       }
@@ -629,6 +658,7 @@ const Practice = (() => {
     }
 
     input.value = "";
+    fitInput();
     say("user", said);
     transcript.push({ role: "user", content: said });
     ask();
@@ -779,6 +809,9 @@ const Practice = (() => {
     Dictation.start({
       text(transcript) {
         input.value = prefix + transcript;
+        // Assigning .value fires no `input` event, so the box has to be
+        // resized by hand or a dictated paragraph stays one line tall.
+        fitInput();
       },
       end() {
         setMic(false);

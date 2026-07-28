@@ -207,14 +207,18 @@
             </div>
 
             <div class="practice-composer" id="practice-composer" hidden>
-              <input
+              <!-- A textarea, not an input: an interview answer is a
+                   paragraph, and a single-line field hides all but the
+                   first few words of it. Grows with its content; Enter
+                   still sends, Shift+Enter breaks the line. -->
+              <textarea
                 id="practice-input"
                 class="practice-input"
-                type="text"
+                rows="1"
                 maxlength="2000"
                 autocomplete="off"
                 placeholder="Type your answer and hit enter"
-              />
+              ></textarea>
               <button
                 type="button"
                 class="mic-btn"
