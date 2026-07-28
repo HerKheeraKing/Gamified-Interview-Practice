@@ -178,12 +178,24 @@ choice changed. The menu is absolutely positioned, so opening it costs
 the composer nothing.
 
 Device labels are withheld by `enumerateDevices()` until the page has
-been granted a microphone at least once, so the list reads "Microphone
-1, 2" only until the first grant — after that the real names come back
-for free, and Chrome remembers the grant across visits. The menu is
-rebuilt every time it opens, so labels upgrade and newly plugged devices
-appear without a reload. Opening it never spends a permission prompt;
-pressing dictate does, because the prompt is coming anyway.
+been granted a microphone at least once. Unlabelled devices are dropped
+rather than numbered, so before the grant the menu holds a single
+"System default" row and a line saying where the names went — numbering
+anonymous inputs only turns a list nobody can act on into a long list
+nobody can act on. After the grant the real names come back for free,
+and Chrome remembers it across visits.
+
+The menu is rebuilt every time it opens, so labels upgrade and newly
+plugged devices appear without a reload. Opening it never spends a
+permission prompt; pressing dictate does, because the prompt is coming
+anyway.
+
+The options scroll inside a capped `min(300px, 40vh)`; the caveat below
+them stays pinned. A dozen inputs is normal once virtual devices are in
+play (Voicemod, Steam, OBS, a headset and its Communications twin all
+enumerate separately), and unbounded the menu grew ~450px upward from a
+bottom-anchored origin and ran off the top of the modal, where the
+scroll container clipped the first entries away.
 
 `Dictation` is a separate module from `Voice` despite driving the same
 recogniser. Voice owns turn-taking, synthesis and a conversation with

@@ -321,7 +321,17 @@ const Microphones = (() => {
     }
   }
 
-  /** [{ id, label }] for every audio input. Empty when unsupported. */
+  /**
+   * [{ id, label }] for every audio input this page is allowed to name.
+   *
+   * Devices without labels are dropped rather than numbered. Before
+   * permission the browser hands back one anonymous entry per input,
+   * and inventing "Microphone 1, 2, 3…" for them turns a list nobody
+   * can act on into a long list nobody can act on — the names are the
+   * only thing that would make choosing possible. An empty result means
+   * "offer the system default and nothing else", which is the honest
+   * state until the microphone has been granted once.
+   */
   async function list({ prime = false } = {}) {
     if (!supported()) {
       return [];
@@ -334,8 +344,8 @@ const Microphones = (() => {
     try {
       const devices = await media.enumerateDevices();
       return devices
-        .filter((d) => d.kind === "audioinput")
-        .map((d, i) => ({ id: d.deviceId, label: d.label || `Microphone ${i + 1}` }));
+        .filter((d) => d.kind === "audioinput" && d.label)
+        .map((d) => ({ id: d.deviceId, label: d.label }));
     } catch (err) {
       return [];
     }

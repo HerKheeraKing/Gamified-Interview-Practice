@@ -1516,6 +1516,33 @@ main {
    sits on a fixed backdrop; this one floats over live text, and at the
    panel's ~0.16 the words underneath read straight through it. */
 
+/* Only the options scroll; the note below them stays put.
+ *
+ * A machine with a dozen inputs is normal once virtual devices are in
+ * play — Voicemod, Steam, OBS, a headset and its Communications twin all
+ * enumerate separately. Unbounded, the menu grew ~450px upward from a
+ * bottom-anchored origin and ran off the top of the modal, where the
+ * scroll container clipped it: the first entries were simply gone.
+ *
+ * The vh term matters as much as the px one. A fixed cap that fits a
+ * tall window still overshoots a short one, and this menu grows upward
+ * into the least available space. */
+.mic-list {
+  max-height: min(300px, 40vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mic-list::-webkit-scrollbar { width: 8px; }
+
+.mic-list::-webkit-scrollbar-thumb {
+  background: rgba(200, 245, 255, 0.35);
+  border-radius: 999px;
+  box-shadow: 0 0 8px rgba(165, 230, 255, 0.6);
+}
+
+.mic-list::-webkit-scrollbar-track { background: transparent; }
+
 .mic-option {
   display: flex;
   align-items: center;

@@ -1010,12 +1010,17 @@ const Practice = (() => {
       return;
     }
 
-    const devices = await Microphones.list({ prime });
-    picker.hidden = mode === "handoff" || devices.length === 0;
+    picker.hidden = mode === "handoff";
     if (picker.hidden) {
       closeMicMenu();
       return;
     }
+
+    // Named devices only. Until the microphone has been granted once the
+    // browser withholds every label, and this comes back empty — leaving
+    // a single "System default" row, which is the whole truth available
+    // at that point.
+    const devices = await Microphones.list({ prime });
 
     // A remembered device that has since been unplugged falls back to
     // the default rather than showing a selection that isn't real.
@@ -1025,12 +1030,24 @@ const Practice = (() => {
 
     const rows = [{ id: "", label: "System default" }, ...devices];
     menu.innerHTML =
-      rows.map((d) => option(d, d.id === live)).join("") +
-      `<p class="mic-note">Browser speech recognition follows your system
-       default input. If a choice here doesn't take, change the default in
-       your computer's sound settings.</p>`;
+      `<div class="mic-list">${rows.map((d) => option(d, d.id === live)).join("")}</div>` +
+      `<p class="mic-note">${noteFor(devices.length)}</p>`;
 
     document.getElementById("mic-caret").classList.toggle("chosen", Boolean(live));
+  }
+
+  /**
+   * A lone default row needs explaining, or it reads as a broken list
+   * rather than a browser withholding names it hasn't been asked for.
+   */
+  function noteFor(count) {
+    if (count === 0) {
+      return `Your devices will be listed once you've allowed the
+              microphone — press the mic button to do that.`;
+    }
+    return `Browser speech recognition follows your system default input.
+            If a choice here doesn't take, change the default in your
+            computer's sound settings.`;
   }
 
   function option(device, selected) {
