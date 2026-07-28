@@ -1208,6 +1208,42 @@ const Practice = (() => {
     // what a dense run of long words has left to climb into.
     const GAIN = 1.1;
 
+    /**
+     * Where the quiet end of the scale sits, and how far the loud end
+     * reaches past it.
+     *
+     * Smoothing the flicker away had left the whole effect nearly
+     * invisible, and the reason is worth naming: the level during speech
+     * only travels between about 0.6 and 0.85, so mapping 0..1 straight
+     * onto the orb spent most of the available range on values the orb
+     * never actually shows. FLOOR and SPAN re-aim the output at the part
+     * of the scale speech uses, which buys a much wider swing without
+     * touching a single time constant — the smoothing is exactly as it
+     * was, it is only being shown at a legible size.
+     */
+    const FLOOR = 0.34;
+    const SPAN = 1.5;
+
+    /**
+     * How far from round the orb is allowed to get, and how fast the
+     * bulge travels around it.
+     *
+     * The wobble is a rotating ellipse rather than a morphing outline: a
+     * long axis that slowly walks around the orb reads as something soft
+     * being pushed from the inside, which is the same thing a blob does
+     * and costs a transform rather than a repaint. That matters on the
+     * glass layer especially, which carries a backdrop-filter — warping
+     * its border-radius would re-blur what's behind it every frame, on
+     * the device least able to afford it.
+     *
+     * Each layer gets its own rate and its own starting angle. Moving
+     * them together would read as one rigid object being squeezed; it is
+     * the disagreement between them that reads as alive.
+     */
+    const WARP_MIN = 0.018;
+    const WARP_MAX = 0.062;
+    const AXIS_DPS = 23;
+
     let energy = 0;
     let level = 0;
     let last = 0;
@@ -1238,7 +1274,14 @@ const Practice = (() => {
       energy *= Math.exp(-dt / DECAY_MS);
       const tau = energy > level ? RISE_MS : FALL_MS;
       level += (energy - level) * (1 - Math.exp(-dt / tau));
-      return Math.min(1, level * GAIN);
+      // Expanded about FLOOR rather than about zero, so silence still
+      // lands at nothing and the speaking band gets the rest of the
+      // range. Clamped at both ends: below, so a fading tail can't push
+      // the orb inside-out; above, so a dense run of long words tops out
+      // bright instead of overshooting into something the CSS never
+      // anticipated.
+      const shown = (Math.min(1, level * GAIN) - FLOOR) * SPAN + FLOOR * SPAN * 0.35;
+      return Math.max(0, Math.min(1, shown));
     }
 
     function start() {
@@ -1249,7 +1292,7 @@ const Practice = (() => {
 
     function tick(now) {
       const shown = advance(now);
-      paint(shown);
+      paint(shown, now);
       // Runs on while there is anything left to show, so the glow fades
       // out on its own after the last word instead of being cut.
       if (level > 0.002 || energy > 0.002) {
@@ -1260,17 +1303,43 @@ const Practice = (() => {
       release();
     }
 
-    function paint(shown) {
+    /**
+     * An ellipse of the given size, bulging by `warp` along an axis at
+     * `deg`. The two rotations cancel for anything downstream — only the
+     * scale between them is left tilted — so the layer stays upright
+     * while its long axis walks around it.
+     */
+    function wobble(size, warp, deg) {
+      const x = (size * (1 + warp)).toFixed(4);
+      const y = (size * (1 - warp)).toFixed(4);
+      return `rotate(${deg.toFixed(2)}deg) scale(${x}, ${y}) rotate(${(-deg).toFixed(2)}deg)`;
+    }
+
+    function paint(shown, now) {
       const orb = document.getElementById("orb");
       const core = orb && orb.querySelector(".orb-core");
       const halo = orb && orb.querySelector(".orb-halo");
+      const glass = orb && orb.querySelector(".orb-glass");
       if (!core) return;
 
+      const seconds = now / 1000;
+      const warp = WARP_MIN + shown * (WARP_MAX - WARP_MIN);
+
       orb.dataset.pulse = "speech";
-      core.style.transform = `scale(${(0.92 + shown * 0.28).toFixed(4)})`;
-      core.style.opacity = (0.55 + shown * 0.45).toFixed(4);
+
+      core.style.transform = wobble(0.88 + shown * 0.42, warp, seconds * AXIS_DPS);
+      core.style.opacity = (0.42 + shown * 0.58).toFixed(4);
+
+      if (glass) {
+        // Least of the three. This is the sphere the eye reads as the
+        // object's edge, and an edge that moves as much as the light
+        // inside it stops looking like glass.
+        glass.style.transform = wobble(1, warp * 0.55, 90 - seconds * AXIS_DPS * 0.72);
+      }
+
       if (halo) {
-        halo.style.transform = `scale(${(1.28 + shown * 0.24).toFixed(4)})`;
+        halo.style.transform = wobble(1.24 + shown * 0.34, warp * 0.8, 40 + seconds * AXIS_DPS * 0.61);
+        halo.style.opacity = (0.5 + shown * 0.5).toFixed(4);
       }
     }
 
@@ -1285,7 +1354,7 @@ const Practice = (() => {
       const orb = document.getElementById("orb");
       if (!orb) return;
       delete orb.dataset.pulse;
-      [".orb-core", ".orb-halo"].forEach((sel) => {
+      [".orb-core", ".orb-halo", ".orb-glass"].forEach((sel) => {
         const el = orb.querySelector(sel);
         if (!el) return;
         el.style.transform = "";

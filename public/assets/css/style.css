@@ -2367,6 +2367,15 @@ main {
 .orb[data-state="speaking"][data-pulse="speech"] .orb-halo {
   animation: none;
 }
+
+/* The halo's opacity transition has to go with them. It exists to ease
+   the step between resting states, and against a value being rewritten
+   every frame it stops being an ease and becomes a 0.4s lag — the orb
+   would trail the voice by most of a second, which is the one thing all
+   of this is for. */
+.orb[data-state="speaking"][data-pulse="speech"] .orb-halo {
+  transition: none;
+}
 .orb[data-state="speaking"] .orb-glass {
   background:
     radial-gradient(circle at 33% 27%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.06) 26%, rgba(255, 255, 255, 0) 46%),
