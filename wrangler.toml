@@ -18,3 +18,23 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "interview-case-files"
 database_id = "de7dfe1a-f7ac-4273-8607-e5691b6d6389"
+
+# AI practice (Text + Live Voice) needs ANTHROPIC_API_KEY.
+#
+# It is a SECRET, so it is deliberately absent from this file — this file
+# is committed, secrets are not. Set it once with:
+#
+#   npx wrangler secret put ANTHROPIC_API_KEY
+#
+# and locally in .dev.vars (already gitignored):
+#
+#   ANTHROPIC_API_KEY=sk-ant-...
+#
+# Without it, /api/coach answers 503 and the two AI modes say so plainly;
+# the manual scorecard and Send to Claude keep working regardless.
+#
+# COACH_MODEL is an optional plain var — set it here to override the
+# default (claude-sonnet-5), e.g. for a cheaper model:
+#
+# [vars]
+# COACH_MODEL = "claude-haiku-4-5-20251001"

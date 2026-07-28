@@ -8,7 +8,8 @@
  *   2. Credentials  - the one place that decides "is this login valid"
  *   3. Detectives   - account rows + session tokens
  *   4. CaseLog      - XP entries, read and merge
- *   5. Router       - maps requests to the layers above
+ *   5. Coach        - the only place that holds the Anthropic API key
+ *   6. Router       - maps requests to the layers above
  *
  * Everything that isn't /api/* falls through to the static assets
  * binding, so the Worker serves the whole site from one deployment.
@@ -284,7 +285,190 @@ const CaseLog = (() => {
 })();
 
 /* ---------------------------------------------------------- */
-/* 5. ROUTER                                                   */
+/* 5. COACH                                                    */
+/* ---------------------------------------------------------- */
+
+/**
+ * The interviewer. Owns the Anthropic API key and everything about
+ * Anthropic's wire format.
+ *
+ * The browser never sees either. It POSTs { question, messages } and
+ * reads back a stream of two event shapes and nothing else:
+ *
+ *   data: {"text": "..."}      a chunk of coaching prose, in order
+ *   data: {"done": true}       the turn is finished
+ *
+ * That narrow contract is the whole point. Swapping models, changing
+ * the system prompt, or moving to a different provider entirely never
+ * reaches the client, and no request path exists that could leak the
+ * key back out — it is read here and nowhere else in the codebase.
+ *
+ * Scores ride inside the prose rather than arriving as tool use, so a
+ * single stream can be spoken aloud the instant it starts. The model
+ * writes its coaching, then a final SCORE_MARKER line holding JSON.
+ * The client speaks everything before the marker and parses what
+ * follows. Tool use would have forced the client to wait for a
+ * complete JSON block before it could say a word.
+ */
+const Coach = (() => {
+  const ENDPOINT = "https://api.anthropic.com/v1/messages";
+  const API_VERSION = "2023-06-01";
+  const DEFAULT_MODEL = "claude-sonnet-5";
+  const MAX_TOKENS = 1024;
+  const MAX_TURNS = 24;
+  const MAX_CHARS = 4000;
+
+  // Must match the `key` values in public/assets/js/questions.js.
+  // The client ignores any key it doesn't recognise, so adding a
+  // category here before adding it there degrades quietly.
+  const RUBRIC = [
+    ["structure", "Clear STAR-style frame (Situation, Task, Action, Result) rather than a ramble"],
+    ["relevance", "Actually answers the question that was asked"],
+    ["clarity", "Concise, confident delivery with little filler"],
+    ["evidence", "Specific details — tools, numbers, named outcomes"],
+    ["impact", "Lands the point cleanly instead of trailing off"],
+  ];
+
+  const SCORE_MARKER = "[[SCORES]]";
+
+  /**
+   * Run one interviewer turn. Resolves to a Response carrying the
+   * simplified event stream described above.
+   */
+  async function converse(env, question, messages) {
+    if (!env.ANTHROPIC_API_KEY) {
+      return Responses.fail("AI practice isn't configured on this deployment.", 503);
+    }
+
+    const upstream = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "anthropic-version": API_VERSION,
+        "x-api-key": env.ANTHROPIC_API_KEY,
+      },
+      body: JSON.stringify({
+        model: env.COACH_MODEL || DEFAULT_MODEL,
+        max_tokens: MAX_TOKENS,
+        stream: true,
+        system: systemPrompt(question),
+        messages: trim(messages),
+      }),
+    });
+
+    if (!upstream.ok) {
+      console.error("Anthropic rejected the turn:", upstream.status, await upstream.text());
+      return Responses.fail("The interviewer is unavailable right now.", 502);
+    }
+
+    return new Response(upstream.body.pipeThrough(simplify()), {
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      },
+    });
+  }
+
+  function systemPrompt(question) {
+    const rubric = RUBRIC.map(([key, hint]) => `- ${key}: ${hint}`).join("\n");
+
+    return [
+      "You are a warm but exacting technical interviewer running a mock interview.",
+      "",
+      `The question on the table is: "${question}"`,
+      "",
+      "The candidate is practising for cloud engineering roles (AWS, Python).",
+      "They are speaking or typing an answer to that question and nothing else.",
+      "",
+      "Every time the candidate answers, reply in this order:",
+      "1. Two to four sentences of specific coaching. Name what actually worked",
+      "   and the single highest-value thing to change. Quote their own words back",
+      "   when it helps. No generic praise, no bullet lists, no headings.",
+      "2. One short follow-up question a real interviewer would ask next.",
+      "3. On its own final line, exactly this and nothing after it:",
+      `   ${SCORE_MARKER}{"structure":N,"relevance":N,"clarity":N,"evidence":N,"impact":N}`,
+      "",
+      "Each N is an integer from 1 to 5 scoring that answer against:",
+      rubric,
+      "",
+      "Score honestly — a vague answer with no specifics earns 2s, not 4s.",
+      "Keep everything before the final line comfortable to read aloud: this is",
+      "often spoken back to the candidate by a voice, so avoid markdown, code",
+      "fences, emoji, and anything that only makes sense on a screen.",
+      "",
+      "If the candidate asks a clarifying question instead of answering, answer it",
+      "briefly in character and omit the final line entirely.",
+    ].join("\n");
+  }
+
+  /**
+   * Anthropic's SSE in, our two-shape SSE out.
+   *
+   * Anthropic frames each event across multiple lines and interleaves
+   * ping/error/lifecycle events with the text deltas. Everything that
+   * isn't a text delta is dropped here, so the client's reader is a
+   * dozen lines instead of a parser.
+   */
+  function simplify() {
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+    let buffer = "";
+
+    return new TransformStream({
+      transform(chunk, controller) {
+        buffer += decoder.decode(chunk, { stream: true });
+
+        // Complete lines only — a delta can be split across chunks.
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const text = textOf(line);
+          if (text) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
+          }
+        }
+      },
+
+      flush(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+      },
+    });
+
+    /** The text a `data:` line carries, or "" for every other line. */
+    function textOf(line) {
+      if (!line.startsWith("data:")) {
+        return "";
+      }
+      try {
+        const event = JSON.parse(line.slice(5));
+        const isText =
+          event.type === "content_block_delta" && event.delta.type === "text_delta";
+        return isText ? event.delta.text : "";
+      } catch (err) {
+        return "";
+      }
+    }
+  }
+
+  /**
+   * Keep the conversation bounded. A practice session is short by
+   * nature, so anything longer is either a stuck client or someone
+   * treating the endpoint as a free chatbot.
+   */
+  function trim(messages) {
+    return messages
+      .filter((m) => m && (m.role === "user" || m.role === "assistant") && m.content)
+      .slice(-MAX_TURNS)
+      .map((m) => ({ role: m.role, content: String(m.content).slice(0, MAX_CHARS) }));
+  }
+
+  return { converse };
+})();
+
+/* ---------------------------------------------------------- */
+/* 6. ROUTER                                                   */
 /* ---------------------------------------------------------- */
 
 async function handleApi(request, env, path) {
@@ -320,6 +504,18 @@ async function handleApi(request, env, path) {
   if (path === "/api/log" && request.method === "DELETE") {
     await CaseLog.clear(env.DB, detective.id);
     return Responses.json({ log: [] });
+  }
+
+  // Sitting behind the session check above is deliberate: this is the
+  // one route that spends money on every call, so it costs a codename.
+  if (path === "/api/coach" && request.method === "POST") {
+    const body = await readJson(request);
+    const question = String(body.question || "").slice(0, 500);
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    if (!question || messages.length === 0) {
+      return Responses.fail("No question to work.", 400);
+    }
+    return Coach.converse(env, question, messages);
   }
 
   return Responses.fail("No such case file.", 404);

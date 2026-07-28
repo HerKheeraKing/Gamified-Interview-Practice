@@ -169,6 +169,67 @@
         <p class="modal-kicker" id="modal-case-num">CASE FILE</p>
         <h3 class="modal-question" id="modal-question"></h3>
 
+        <!-- PRACTICE (mode picker + whichever stage is chosen).
+             Only this block changes between modes — the question above
+             and the scorecard below are identical in all three. -->
+        <div class="practice">
+          <div class="practice-modes" id="practice-modes">
+            <button type="button" class="practice-mode" data-mode="text">
+              <span class="pm-name">Text Practice</span>
+              <span class="pm-sub">Type it, get coached</span>
+            </button>
+            <button type="button" class="practice-mode" data-mode="voice">
+              <span class="pm-name">Live Voice</span>
+              <span class="pm-sub">Say it out loud</span>
+            </button>
+            <button type="button" class="practice-mode" data-mode="handoff">
+              <span class="pm-name">Send to Claude</span>
+              <span class="pm-sub">Copy a prompt — no API cost</span>
+            </button>
+          </div>
+
+          <div class="practice-panel" id="practice-panel" hidden>
+            <p class="practice-note" id="practice-note"></p>
+
+            <div class="practice-stage" id="stage-text" hidden>
+              <div class="chat-log" id="chat-log"></div>
+            </div>
+
+            <div class="practice-stage" id="stage-voice" hidden>
+              <div class="orb" id="orb" data-state="idle">
+                <span class="orb-halo"></span>
+                <span class="orb-glass"></span>
+                <span class="orb-core"></span>
+              </div>
+              <p class="orb-state" id="orb-state">Mic closed</p>
+              <p class="orb-caption" id="orb-caption"></p>
+              <button type="button" class="ghost-btn" id="voice-toggle">Open the mic</button>
+            </div>
+
+            <div class="practice-composer" id="practice-composer" hidden>
+              <input
+                id="practice-input"
+                class="practice-input"
+                type="text"
+                maxlength="2000"
+                autocomplete="off"
+                placeholder="Type your answer and hit enter"
+              />
+              <button type="button" class="composer-btn" id="practice-send">Send</button>
+            </div>
+
+            <div class="practice-stage" id="stage-handoff" hidden>
+              <p class="handoff-copy">
+                Copies this question plus a full interviewer prompt to your clipboard.
+                Paste it into any Claude session, practise there, then come back and
+                fill in the dots yourself.
+              </p>
+              <button type="button" class="ghost-btn" id="handoff-copy">Copy the interviewer prompt</button>
+              <p class="handoff-status" id="handoff-status"></p>
+            </div>
+          </div>
+        </div>
+
         <div class="score-fields" id="score-fields"></div>
 
         <label class="bonus-check">
@@ -216,6 +277,7 @@
 
   <script src="assets/js/identity.js"></script>
   <script src="assets/js/questions.js"></script>
+  <script src="assets/js/coach.js"></script>
   <script src="assets/js/app.js"></script>
 </body>
 </html>

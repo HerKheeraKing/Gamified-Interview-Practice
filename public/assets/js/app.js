@@ -7,7 +7,9 @@
  *   1. Storage layer   - persistence, no DOM/UI knowledge
  *   2. Rank logic       - pure functions, no side effects
  *   3. Render layer     - DOM writes only, reads state, no calculations
- *   4. Event wiring     - glues user actions to state + render
+ *   4. Score modal      - the scorecard, and the only owner of the dots
+ *   5. Practice modes   - the middle of that modal: text, voice, handoff
+ *   6+ Event wiring     - glues user actions to state + render
  *
  * Kept intentionally framework-free and single-file per concern
  * so the whole thing stays readable without a build step.
@@ -356,13 +358,35 @@ const ScoreModal = (() => {
 
     renderFields();
     updateTotal();
+    Practice.reset(activeCase.question);
 
     document.getElementById("case-modal-backdrop").classList.add("open");
   }
 
   function close() {
     document.getElementById("case-modal-backdrop").classList.remove("open");
+    Practice.reset(null);
     activeCase = null;
+  }
+
+  /**
+   * Fill the dots from a set of Claude's grades.
+   *
+   * Unknown keys are ignored rather than rejected, so the Worker's
+   * rubric and this one can drift a category apart without either
+   * side breaking. Whatever lands here is still only a suggestion —
+   * the dots stay clickable and the detective has the last word.
+   */
+  function applyGrades(grades) {
+    let applied = false;
+    for (const [key, value] of Object.entries(grades)) {
+      if (key in scores) {
+        scores[key] = value;
+        paint(key);
+        applied = true;
+      }
+    }
+    if (applied) updateTotal();
   }
 
   function renderFields() {
@@ -384,12 +408,19 @@ const ScoreModal = (() => {
       group.querySelectorAll(".dot").forEach((dot) => {
         dot.addEventListener("click", () => {
           scores[key] = Number(dot.dataset.value);
-          group.querySelectorAll(".dot").forEach((d) => {
-            d.classList.toggle("selected", Number(d.dataset.value) <= scores[key]);
-          });
+          paint(key);
           updateTotal();
         });
       });
+    });
+  }
+
+  /** Light one category's dots up to its current score. */
+  function paint(key) {
+    const group = document.querySelector(`.score-dots[data-key="${key}"]`);
+    if (!group) return;
+    group.querySelectorAll(".dot").forEach((dot) => {
+      dot.classList.toggle("selected", Number(dot.dataset.value) <= scores[key]);
     });
   }
 
@@ -425,11 +456,271 @@ const ScoreModal = (() => {
     Render.all();
   }
 
-  return { open, close, submit };
+  return { open, close, submit, applyGrades, updateTotal };
 })();
 
 /* ---------------------------------------------------------- */
-/* 5. VIEW SWITCHING                                            */
+/* 5. PRACTICE MODES                                            */
+/* ---------------------------------------------------------- */
+
+/**
+ * The middle of the case modal.
+ *
+ * Three ways to work the same question, and one rule that keeps them
+ * from tangling: this module owns the space between the question and
+ * the scorecard, and nothing else. The case number above it and the
+ * dots, bonus box and Close the Case button below it are identical in
+ * every mode and are never touched here — the only thing Practice ever
+ * says to the rest of the app is `ScoreModal.applyGrades(...)`.
+ *
+ * Two of the modes talk to Claude and one deliberately doesn't:
+ *
+ *   text     typed answers, streamed coaching, dots filled for you
+ *   voice    the same conversation held out loud, orb instead of chat
+ *   handoff  a prompt on the clipboard, practise elsewhere, score by hand
+ *
+ * `reset` is the single entry point for both opening and closing —
+ * passing a question starts fresh, passing null tears down. Every
+ * escape route out of the modal (button, backdrop, Escape, closing the
+ * case) funnels through it, which is what guarantees the microphone
+ * is never left open behind a modal that isn't on screen.
+ */
+const Practice = (() => {
+  const STAGES = { text: "stage-text", voice: "stage-voice", handoff: "stage-handoff" };
+
+  let question = null;
+  let mode = null;
+  let transcript = [];
+  let waiting = false;
+  let live = false;
+
+  function init() {
+    document.getElementById("practice-modes").addEventListener("click", (e) => {
+      const button = e.target.closest(".practice-mode");
+      if (button) choose(button.dataset.mode);
+    });
+
+    document.getElementById("practice-send").addEventListener("click", send);
+    document.getElementById("practice-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") send();
+    });
+
+    document.getElementById("voice-toggle").addEventListener("click", toggleVoice);
+    document.getElementById("handoff-copy").addEventListener("click", copyPrompt);
+  }
+
+  /** Start a fresh session for `question`, or tear everything down with null. */
+  function reset(nextQuestion) {
+    endVoice();
+    question = nextQuestion;
+    mode = null;
+    transcript = [];
+    waiting = false;
+
+    document.getElementById("practice-panel").hidden = true;
+    document.getElementById("chat-log").innerHTML = "";
+    document.getElementById("practice-input").value = "";
+    document.getElementById("handoff-status").textContent = "";
+    document.querySelectorAll(".practice-mode").forEach((b) => b.classList.remove("active"));
+  }
+
+  /* ---- mode switching ---- */
+
+  function choose(next) {
+    if (mode === next) {
+      reset(question);
+      return;
+    }
+
+    endVoice();
+    mode = next;
+    waiting = false;
+
+    document.querySelectorAll(".practice-mode").forEach((button) => {
+      button.classList.toggle("active", button.dataset.mode === mode);
+    });
+
+    Object.entries(STAGES).forEach(([name, id]) => {
+      document.getElementById(id).hidden = name !== mode;
+    });
+
+    document.getElementById("practice-composer").hidden = mode === "handoff";
+    document.getElementById("practice-panel").hidden = false;
+    document.getElementById("practice-input").placeholder =
+      mode === "voice" ? "Or type a quick question…" : "Type your answer and hit enter";
+
+    note(openingNote());
+
+    if (mode === "text" && transcript.length === 0) {
+      say("assistant", "Whenever you're ready — answer the question above and I'll score it.");
+    }
+  }
+
+  /**
+   * What to warn about before the detective starts talking to a wall.
+   * Both AI modes cost money, so both need a codename; voice also
+   * needs browser support the site can't provide itself.
+   */
+  function openingNote() {
+    if (mode === "handoff") {
+      return "";
+    }
+    if (!Identity.isSignedIn()) {
+      return "Sign in with a codename first — AI practice runs through your Cloudflare Worker.";
+    }
+    if (mode === "voice" && !Voice.supported()) {
+      return "This browser has no speech engine. Chrome or Edge will do it; Text Practice works anywhere.";
+    }
+    return "";
+  }
+
+  function note(message) {
+    const element = document.getElementById("practice-note");
+    element.textContent = message;
+    element.hidden = !message;
+  }
+
+  /* ---- text mode ---- */
+
+  function send() {
+    const input = document.getElementById("practice-input");
+    const said = input.value.trim();
+    if (!said || waiting) return;
+    input.value = "";
+
+    // In voice mode the composer is a side channel into the same
+    // conversation, so Voice takes it and keeps its own turn order.
+    if (mode === "voice") {
+      Voice.submit(said);
+      return;
+    }
+
+    say("user", said);
+    transcript.push({ role: "user", content: said });
+    ask();
+  }
+
+  function ask() {
+    waiting = true;
+    const bubble = say("assistant", "");
+    let reply = "";
+
+    Coach.ask(question, transcript, {
+      text(chunk) {
+        reply += chunk;
+        bubble.textContent = reply;
+        scrollChat();
+      },
+      grades: ScoreModal.applyGrades,
+      done() {
+        waiting = false;
+        transcript.push({ role: "assistant", content: reply });
+        scrollChat();
+      },
+      error(message) {
+        waiting = false;
+        bubble.textContent = message;
+        bubble.parentElement.classList.add("chat-error");
+        scrollChat();
+      },
+    });
+  }
+
+  /** Append a bubble and hand back its text node for streaming into. */
+  function say(who, text) {
+    const log = document.getElementById("chat-log");
+    const row = document.createElement("div");
+    row.className = `chat-row chat-${who}`;
+
+    const bubble = document.createElement("p");
+    bubble.className = "chat-bubble";
+    bubble.textContent = text;
+
+    row.appendChild(bubble);
+    log.appendChild(row);
+    scrollChat();
+    return bubble;
+  }
+
+  function scrollChat() {
+    const log = document.getElementById("chat-log");
+    log.scrollTop = log.scrollHeight;
+  }
+
+  /* ---- voice mode ---- */
+
+  function toggleVoice() {
+    if (live) {
+      endVoice();
+      return;
+    }
+
+    if (!Identity.isSignedIn() || !Voice.supported()) {
+      note(openingNote());
+      return;
+    }
+
+    live = true;
+    document.getElementById("voice-toggle").textContent = "End the session";
+
+    Voice.start(question, {
+      state(state) {
+        setOrb(state, LABELS[state], null);
+      },
+      heard(text) {
+        setOrb(null, null, text);
+      },
+      said(text) {
+        setOrb(null, null, text);
+      },
+      grades: ScoreModal.applyGrades,
+      error: note,
+    });
+  }
+
+  function endVoice() {
+    live = false;
+    Voice.stop();
+    setOrb("idle", LABELS.idle, "");
+    document.getElementById("voice-toggle").textContent = "Open the mic";
+  }
+
+  const LABELS = {
+    idle: "Mic closed",
+    listening: "Listening…",
+    thinking: "Thinking…",
+    speaking: "Speaking",
+  };
+
+  /** Null for state or caption means "leave that one alone". */
+  function setOrb(state, label, caption) {
+    if (state !== null) {
+      document.getElementById("orb").dataset.state = state;
+    }
+    if (label !== null && label !== undefined) {
+      document.getElementById("orb-state").textContent = label;
+    }
+    if (caption !== null && caption !== undefined) {
+      document.getElementById("orb-caption").textContent = caption;
+    }
+  }
+
+  /* ---- handoff mode ---- */
+
+  async function copyPrompt() {
+    const status = document.getElementById("handoff-status");
+    const copied = await Handoff.copy(question);
+    status.textContent = copied
+      ? "Copied. Paste it into Claude, run the interview, then score yourself below."
+      : "Couldn't reach the clipboard — your browser blocked it.";
+    status.classList.toggle("ok", copied);
+  }
+
+  return { init, reset };
+})();
+
+/* ---------------------------------------------------------- */
+/* 6. VIEW SWITCHING                                            */
 /* ---------------------------------------------------------- */
 
 const Views = (() => {
@@ -456,7 +747,7 @@ const Views = (() => {
 })();
 
 /* ---------------------------------------------------------- */
-/* 6. LOGIN                                                     */
+/* 7. LOGIN                                                     */
 /* ---------------------------------------------------------- */
 
 /**
@@ -550,13 +841,14 @@ const Login = (() => {
 })();
 
 /* ---------------------------------------------------------- */
-/* 7. BOOTSTRAP                                                 */
+/* 8. BOOTSTRAP                                                 */
 /* ---------------------------------------------------------- */
 
 function bootstrap() {
   Render.all();
   Views.init();
   Login.init();
+  Practice.init();
 
   // Returning detectives sync silently — no modal, no spinner, no wait.
   Storage.refresh().then((changed) => {
@@ -575,6 +867,13 @@ function bootstrap() {
     if (e.target.id === "case-modal-backdrop") ScoreModal.close();
   });
   document.getElementById("submit-score").addEventListener("click", ScoreModal.submit);
+  document.getElementById("bonus-check").addEventListener("change", ScoreModal.updateTotal);
+
+  // A live microphone behind a dismissed modal is the one failure worth
+  // wiring a keyboard escape for; ScoreModal.close() shuts Practice down.
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") ScoreModal.close();
+  });
 
   document.getElementById("reset-btn").addEventListener("click", () => {
     if (confirm("Reset all XP and case history? This can't be undone.")) {
@@ -592,17 +891,3 @@ if (document.readyState === "loading") {
 } else {
   bootstrap();
 }
-
-// Recalculate modal total whenever the bonus checkbox changes
-document.addEventListener("change", (e) => {
-  if (e.target && e.target.id === "bonus-check") {
-    const totalEl = document.getElementById("modal-total-xp");
-    const current = Array.from(document.querySelectorAll(".score-dots"))
-      .reduce((sum, group) => {
-        const selected = group.querySelectorAll(".dot.selected").length;
-        return sum + selected;
-      }, 0);
-    const bonus = e.target.checked ? 5 : 0;
-    totalEl.textContent = current + bonus;
-  }
-});
