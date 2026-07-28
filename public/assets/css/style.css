@@ -1476,15 +1476,23 @@ main {
 
 /* ---------------- Send to Claude ---------------- */
 
+/* Centred to match the hint-and-input column in Text Practice. All three
+   stages put their content on the modal's centre line, so switching mode
+   doesn't shift the panel's visual axis. */
 #stage-handoff:not([hidden]) {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 14px;
 }
 
 .handoff-copy {
+  /* Short of the full width so the ragged edge stays near the centre —
+     centred text set to the container's full measure reads as ordinary
+     left-aligned prose that just happens to have an uneven right edge. */
   margin: 0;
+  max-width: 44ch;
+  text-align: center;
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--text-muted);
@@ -1493,6 +1501,7 @@ main {
 .handoff-status {
   margin: 0;
   min-height: 16px;
+  text-align: center;
   font-size: 12px;
   color: var(--text-faint);
 }
