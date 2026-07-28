@@ -503,7 +503,7 @@ const Practice = (() => {
     document.getElementById("practice-send").addEventListener("click", send);
 
     const input = document.getElementById("practice-input");
-    input.addEventListener("input", fitInput);
+    input.addEventListener("input", refreshComposer);
     input.addEventListener("keydown", (e) => {
       // Enter sends, as it did when this was a single-line field.
       // Shift+Enter is the escape hatch now that a line break is
@@ -514,6 +514,7 @@ const Practice = (() => {
       }
     });
 
+    document.getElementById("preview-expand").addEventListener("click", toggleExpand);
     document.getElementById("practice-mic").addEventListener("click", toggleDictation);
     document.getElementById("voice-toggle").addEventListener("click", toggleVoice);
     document.getElementById("handoff-copy").addEventListener("click", copyPrompt);
@@ -531,7 +532,7 @@ const Practice = (() => {
     document.getElementById("practice-panel").hidden = true;
     document.getElementById("chat-log").innerHTML = "";
     document.getElementById("practice-input").value = "";
-    fitInput();
+    refreshComposer();
     document.getElementById("handoff-status").textContent = "";
     document.querySelectorAll(".practice-mode").forEach((b) => b.classList.remove("active"));
   }
@@ -615,21 +616,65 @@ const Practice = (() => {
   }
 
   /**
-   * Match the answer box's height to its contents.
+   * Make the composer reflect what's in it — box height and preview
+   * card, together.
    *
-   * Called from the `input` event and from everywhere the value is set
-   * in code — dictation rewriting the transcript, send() clearing it,
-   * reset() emptying it. Programmatic assignment doesn't fire `input`,
-   * so a box filled by the microphone would otherwise stay one line
-   * tall and hide the very text the mic button exists to produce.
-   *
-   * Collapsing to `auto` first is what allows it to shrink again; read
-   * against a fixed height, scrollHeight can only ever grow.
+   * One function rather than two because there is no moment when only
+   * half of it should happen, and every caller would otherwise have to
+   * remember both. Called from the `input` event and from everywhere
+   * the value is set in code — dictation rewriting the transcript,
+   * send() clearing it, reset() emptying it. Programmatic assignment
+   * fires no `input` event, so a box filled by the microphone would
+   * otherwise stay three lines tall with a blank card above it.
    */
-  function fitInput() {
+  function refreshComposer() {
     const input = document.getElementById("practice-input");
+    const text = input.value;
+
+    // Collapsing to `auto` first is what allows it to shrink again; read
+    // against a fixed height, scrollHeight can only ever grow. The floor
+    // and ceiling are CSS's business, not this function's.
     input.style.height = "auto";
     input.style.height = `${input.scrollHeight}px`;
+
+    const card = document.getElementById("composer-preview");
+    card.hidden = !text.trim();
+    document.getElementById("preview-body").textContent = text;
+    document.getElementById("preview-count").textContent = countOf(text);
+
+    // An expanded card holding nothing would reopen empty next time.
+    if (card.hidden) collapsePreview();
+  }
+
+  function countOf(text) {
+    const words = text.trim().split(/\s+/).filter(Boolean).length;
+    return words === 1 ? "1 word" : `${words} words`;
+  }
+
+  /**
+   * Grow the preview into a full reading view and back.
+   *
+   * The collapsed card fades its bottom edge instead of cutting a line
+   * in half, which is what signals there's more without a scrollbar
+   * having to say so. Expanded, the text genuinely ends, so the fade
+   * comes off and the card scrolls instead.
+   */
+  function toggleExpand() {
+    const card = document.getElementById("composer-preview");
+    setExpanded(!card.classList.contains("expanded"));
+  }
+
+  function collapsePreview() {
+    setExpanded(false);
+  }
+
+  function setExpanded(open) {
+    const card = document.getElementById("composer-preview");
+    const button = document.getElementById("preview-expand");
+    card.classList.toggle("expanded", open);
+    button.setAttribute("aria-expanded", String(open));
+    button.setAttribute("aria-label", open ? "Collapse your answer" : "Expand your answer");
+    button.title = open ? "Collapse" : "Expand to read it all";
   }
 
   /* ---- text mode ---- */
@@ -650,7 +695,7 @@ const Practice = (() => {
     if (mode === "voice") {
       if (Voice.submit(said)) {
         input.value = "";
-        fitInput();
+        refreshComposer();
       } else {
         note(openingNote() || "Live Voice needs a browser with a speech engine — try Chrome or Edge.");
       }
@@ -658,7 +703,7 @@ const Practice = (() => {
     }
 
     input.value = "";
-    fitInput();
+    refreshComposer();
     say("user", said);
     transcript.push({ role: "user", content: said });
     ask();
@@ -811,7 +856,7 @@ const Practice = (() => {
         input.value = prefix + transcript;
         // Assigning .value fires no `input` event, so the box has to be
         // resized by hand or a dictated paragraph stays one line tall.
-        fitInput();
+        refreshComposer();
       },
       end() {
         setMic(false);

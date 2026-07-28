@@ -1321,7 +1321,119 @@ main {
 
 /* ---------------- Composer (text + voice share it) ---------------- */
 
+/* The message as it's being written. Same glass family as everything
+   else in the modal, mixed a step above the panel like .practice-note,
+   and the quietest glow of the four surfaces — it's ambient, always on
+   while you type, and must not compete with the thing you're typing
+   into. Nesting order ends up:
+
+     .modal            60px @ 0.15
+     .practice-panel   26px @ 0.14
+     .practice-note    20px @ 0.13   (coral, wants attention)
+     .composer-preview 16px @ 0.10   (quietest, ambient) */
+.composer-preview {
+  margin-top: 18px;
+  padding: 12px 14px 10px;
+  border: 1px solid rgba(165, 230, 255, 0.22);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.026) 0%, rgba(255,255,255,0.012) 45%, rgba(125,211,252,0.045) 100%),
+    rgba(46, 44, 74, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 0 16px rgba(125, 211, 252, 0.10),
+    0 3px 14px rgba(0, 0, 0, 0.20);
+}
+
+.composer-preview[hidden] { display: none; }
+
+.preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.preview-label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+}
+
+.preview-count {
+  flex: 1;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+.preview-expand {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.preview-expand:hover {
+  border-color: var(--border-glow);
+  color: var(--text-primary);
+}
+
+/* One button, two states — the icon swaps rather than the button moving,
+   so the expand control stays put between collapsed and expanded. */
+.preview-expand .icon-shut,
+.composer-preview.expanded .preview-expand .icon-open { display: none; }
+.composer-preview.expanded .preview-expand .icon-shut { display: block; }
+
+.preview-body {
+  margin: 0;
+  max-height: 92px;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+
+  /* Fades the cut rather than slicing a line in half, which is what
+     tells you there's more to read without needing a scrollbar to say
+     so. Removed when expanded, where the text really does end. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+}
+
+.composer-preview.expanded .preview-body {
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-right: 6px;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.composer-preview.expanded .preview-body::-webkit-scrollbar { width: 8px; }
+
+.composer-preview.expanded .preview-body::-webkit-scrollbar-thumb {
+  background: rgba(200, 245, 255, 0.35);
+  border-radius: 999px;
+  box-shadow: 0 0 8px rgba(165, 230, 255, 0.6);
+}
+
+.composer-preview.expanded .preview-body::-webkit-scrollbar-track { background: transparent; }
+
 .practice-composer[hidden] { display: none; }
+
+/* The preview and the box below it are one unit, so they sit closer to
+   each other than either does to the stage above. */
+.composer-preview:not([hidden]) + .practice-composer { margin-top: 10px; }
 
 /* flex-end, not stretch: the field grows upward as the answer wraps, and
    the two buttons stay pinned to its last line rather than stretching
@@ -1348,23 +1460,30 @@ main {
   outline: none;
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
 
-  /* Height is set from scrollHeight in JS on every change. The cap and
-     the scrollbar are here so a very long answer stops eating the modal
-     instead of growing without limit; `resize: none` because the handle
-     would fight the automatic sizing. */
+  /* Three responsibilities, three owners. min-height sets the floor —
+     it opens three lines tall, because an interview answer is a
+     paragraph and a one-line slot invites a one-line answer. JS sets
+     the height from scrollHeight as content arrives. max-height holds
+     the ceiling at six lines so a long answer can't push the score dots
+     and Close the Case below the fold.
+
+     `resize: none` because the drag handle would fight the automatic
+     sizing.
+
+     Scrollable but with no visible scrollbar. Past six lines the
+     preview card above is where the answer is read, so the bar is
+     visual clutter — but the element still has to scroll, or the caret
+     can travel below the fold with no way to follow it. Hiding the
+     chrome while keeping the behaviour is the difference between a tidy
+     box and one that loses your cursor. */
   resize: none;
   overflow-y: auto;
-  max-height: 132px;
+  min-height: 80px;
+  max-height: 140px;
+  scrollbar-width: none;
 }
 
-.practice-input::-webkit-scrollbar { width: 8px; }
-
-.practice-input::-webkit-scrollbar-thumb {
-  background: rgba(200, 245, 255, 0.3);
-  border-radius: 999px;
-}
-
-.practice-input::-webkit-scrollbar-track { background: transparent; }
+.practice-input::-webkit-scrollbar { display: none; }
 
 .practice-input::placeholder { color: var(--text-faint); }
 
