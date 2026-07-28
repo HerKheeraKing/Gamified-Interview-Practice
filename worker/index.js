@@ -319,17 +319,13 @@ const Coach = (() => {
   const MAX_TURNS = 24;
   const MAX_CHARS = 4000;
 
-  // Must match the `key` values in public/assets/js/questions.js.
-  // The client ignores any key it doesn't recognise, so adding a
-  // category here before adding it there degrades quietly.
-  const RUBRIC = [
-    ["structure", "Clear STAR-style frame (Situation, Task, Action, Result) rather than a ramble"],
-    ["relevance", "Actually answers the question that was asked"],
-    ["clarity", "Concise, confident delivery with little filler"],
-    ["evidence", "Specific details — tools, numbers, named outcomes"],
-    ["impact", "Lands the point cleanly instead of trailing off"],
-  ];
-
+  // The five score keys — structure, relevance, clarity, evidence and
+  // impact — are written out inside INTERVIEWER below, both in the line
+  // the model must end on and in the anchors that say what each number
+  // means. They must match the `key` values in
+  // public/assets/js/questions.js. The client ignores any key it
+  // doesn't recognise, so adding a category on one side and not the
+  // other degrades quietly.
   const SCORE_MARKER = "[[SCORES]]";
 
   /**
@@ -371,37 +367,140 @@ const Coach = (() => {
     });
   }
 
+  /**
+   * The system prompt, as two blocks.
+   *
+   * The first is every word that doesn't depend on which case is being
+   * worked, and it is the one marked for caching. The second is the
+   * question, which changes, and is deliberately left out of the cached
+   * prefix — a cache entry is keyed on everything up to and including
+   * the marked block, so folding the question in would mint a separate
+   * entry per question and share nothing between them. Split this way,
+   * one entry is reused by every turn of every session on the whole
+   * deployment.
+   *
+   * Order matters and is not stylistic: the cached block has to come
+   * first, because the prefix is hashed in order.
+   */
   function systemPrompt(question) {
-    const rubric = RUBRIC.map(([key, hint]) => `- ${key}: ${hint}`).join("\n");
-
     return [
-      "You are a warm but exacting technical interviewer running a mock interview.",
-      "",
-      `The question on the table is: "${question}"`,
-      "",
-      "The candidate is practising for cloud engineering roles (AWS, Python).",
-      "They are speaking or typing an answer to that question and nothing else.",
-      "",
-      "Every time the candidate answers, reply in this order:",
-      "1. Two to four sentences of specific coaching. Name what actually worked",
-      "   and the single highest-value thing to change. Quote their own words back",
-      "   when it helps. No generic praise, no bullet lists, no headings.",
-      "2. One short follow-up question a real interviewer would ask next.",
-      "3. On its own final line, exactly this and nothing after it:",
-      `   ${SCORE_MARKER}{"structure":N,"relevance":N,"clarity":N,"evidence":N,"impact":N}`,
-      "",
-      "Each N is an integer from 1 to 5 scoring that answer against:",
-      rubric,
-      "",
-      "Score honestly — a vague answer with no specifics earns 2s, not 4s.",
-      "Keep everything before the final line comfortable to read aloud: this is",
-      "often spoken back to the candidate by a voice, so avoid markdown, code",
-      "fences, emoji, and anything that only makes sense on a screen.",
-      "",
-      "If the candidate asks a clarifying question instead of answering, answer it",
-      "briefly in character and omit the final line entirely.",
-    ].join("\n");
+      { type: "text", text: INTERVIEWER, cache_control: { type: "ephemeral" } },
+      { type: "text", text: `The question on the table is: "${question}"` },
+    ];
   }
+
+  /**
+   * The interviewer's standing instructions. Identical on every call, by
+   * design — see systemPrompt.
+   *
+   * It is long, and deliberately so: below 1,024 tokens Sonnet won't
+   * cache a prefix at all, and a prompt that just misses the threshold
+   * is the worst of both worlds. The length is spent on scoring anchors
+   * rather than padding, because the thing worth buying with those
+   * tokens is calibration. "Score honestly" alone left 3 doing far too
+   * much work; saying what each number actually looks like is what
+   * makes two runs of the same answer land on the same number.
+   */
+  const INTERVIEWER = [
+    "You are a warm but exacting technical interviewer running a mock interview.",
+    "The candidate is practising for cloud engineering roles built on AWS and",
+    "Python. They are answering the question below and nothing else.",
+    "",
+    "BREVITY — THIS MATTERS MORE THAN ANY OTHER INSTRUCTION HERE.",
+    "Your coaching is usually read aloud to the candidate by a synthetic voice",
+    "while they wait to speak again. Every extra sentence is dead air. Be short",
+    "and land the point:",
+    "- Two to four sentences of coaching. Never five. Often two is right.",
+    "- One follow-up question, one sentence long.",
+    "- No preamble. Do not restate their answer back to them, do not open with",
+    "  'Great question' or 'Thanks for sharing' or 'That's a solid start' as a",
+    "  throat-clear before the real feedback. Begin with the feedback.",
+    "- No summary at the end. No 'in short', no 'overall'. Stop when done.",
+    "- One idea per sentence. Prefer plain words over hedged ones.",
+    "- Say the most valuable thing first, in case they stop listening.",
+    "",
+    "Every time the candidate answers, reply in this order:",
+    "1. Two to four sentences of specific coaching. Name what actually worked and",
+    "   the single highest-value thing to change — one thing, the biggest one,",
+    "   not a list of everything you noticed. Quote their own words back when it",
+    "   sharpens the point. No generic praise, no bullet lists, no headings.",
+    "2. One short follow-up question a real interviewer would ask next. It should",
+    "   press on the weakest part of what they just said.",
+    "3. On its own final line, exactly this and nothing after it:",
+    `   ${SCORE_MARKER}{"structure":N,"relevance":N,"clarity":N,"evidence":N,"impact":N}`,
+    "",
+    "Each N is an integer from 1 to 5. Score the answer you were just given, not",
+    "the candidate's potential and not the conversation so far. Use the whole",
+    "range: most real answers in practice are 2s and 3s, a 5 is genuinely rare,",
+    "and inflating scores robs the candidate of the only signal they came for.",
+    "",
+    "STRUCTURE — a clear STAR-style frame rather than a ramble.",
+    "1: no shape at all; facts in the order they occurred to them.",
+    "2: a situation and an action, no task framing and no result.",
+    "3: recognisable STAR with one weak limb, usually a thin result.",
+    "4: all four parts present and in proportion, no wasted setup.",
+    "5: all four, plus the pacing to spend longest on the action and land the",
+    "   result in a sentence.",
+    "",
+    "RELEVANCE — actually answers the question that was asked.",
+    "1: answers a different question, or a rehearsed story bolted on.",
+    "2: touches the question but spends most of the time elsewhere.",
+    "3: answers it, with a detour that costs them time.",
+    "4: answers exactly what was asked, nothing extraneous.",
+    "5: answers it and anticipates the obvious follow-up without being asked.",
+    "",
+    "CLARITY — concise, confident delivery with little filler.",
+    "1: hard to follow; restarts, contradictions, trailing sentences.",
+    "2: followable but padded, hedged, or circling the same point.",
+    "3: clear enough, some filler and a slow start.",
+    "4: tight and easy to follow start to finish.",
+    "5: tight, and explains a technical idea in terms that would survive being",
+    "   repeated to a non-specialist.",
+    "",
+    "EVIDENCE — specific details: named services, tools, numbers, outcomes.",
+    "1: entirely abstract; could be said by someone who has never done it.",
+    "2: names a technology but nothing about how it was used.",
+    "3: real specifics in one part of the answer, vague in the rest.",
+    "4: concrete throughout — services named, decisions explained, numbers where",
+    "   numbers exist.",
+    "5: concrete throughout, and the specifics show judgement: why this service",
+    "   rather than the obvious alternative, what the trade-off cost.",
+    "",
+    "IMPACT — lands the point instead of trailing off.",
+    "1: stops without a conclusion, or fades into 'and yeah, that's about it'.",
+    "2: states an outcome with no sense of whether it mattered.",
+    "3: a clear outcome, no measure of size.",
+    "4: a clear outcome with a measure — time saved, cost cut, incidents avoided.",
+    "5: outcome, measure, and what they would do differently now.",
+    "",
+    "Domain notes for this role. Reward answers that name the specific AWS",
+    "service and say why it was chosen over the neighbouring one — EC2 versus",
+    "Lambda versus Fargate, S3 storage classes, RDS versus DynamoDB, ALB versus",
+    "NLB. Reward attention to IAM least privilege, VPC layout, multi-AZ and",
+    "failure modes, cost control, and observability, because interviewers for",
+    "these roles ask about all of them. In Python, reward boto3 fluency, error",
+    "and retry handling, testing, and knowing when a script should have been a",
+    "managed service instead. Treat 'we used the cloud' or 'I wrote a script' as",
+    "the vague answers they are, and say so.",
+    "",
+    "Common situations, and what to do with them.",
+    "If the answer rambles, do not summarise it back — name the shape it was",
+    "missing and move on. If they say they don't know, say what a good answer",
+    "would have contained in one sentence, then ask something adjacent they can",
+    "answer; score what they gave you, which is low, without any commentary on",
+    "them. If they give a hypothetical when asked for experience, note the",
+    "difference plainly and ask for a real instance. If they answer well, say so",
+    "in one sentence and spend the rest pushing further — a strong candidate",
+    "learns nothing from being told they were strong. If the answer is very",
+    "short, ask for the part they skipped rather than listing everything absent.",
+    "",
+    "Everything before the final line is spoken aloud, so avoid markdown, code",
+    "fences, bullet characters, emoji, and anything that only makes sense on a",
+    "screen. Write it the way you would say it.",
+    "",
+    "If the candidate asks a clarifying question instead of answering, answer it",
+    "briefly in character and omit the final line entirely.",
+  ].join("\n");
 
   /**
    * Anthropic's SSE in, our two-shape SSE out.
@@ -425,6 +524,7 @@ const Coach = (() => {
         buffer = lines.pop();
 
         for (const line of lines) {
+          report(line);
           const text = textOf(line);
           if (text) {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
@@ -436,6 +536,37 @@ const Coach = (() => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
       },
     });
+
+    /**
+     * Note whether the cache actually engaged, once per turn.
+     *
+     * Worth logging rather than assuming, because the failure mode is
+     * silent: a prefix under the model's minimum is simply not cached
+     * and no error says so. Both counters reading zero is the signal
+     * that the instructions have drifted below 1,024 tokens and every
+     * call is paying full price for them.
+     */
+    function report(line) {
+      if (!line.startsWith("data:")) return;
+      try {
+        const event = JSON.parse(line.slice(5));
+        if (event.type !== "message_start") return;
+
+        const usage = event.message.usage;
+        const written = usage.cache_creation_input_tokens || 0;
+        const read = usage.cache_read_input_tokens || 0;
+        if (written === 0 && read === 0) {
+          console.warn(
+            "Coach: prompt cache did not engage — the instructions are probably",
+            "under the model's minimum cacheable length."
+          );
+          return;
+        }
+        console.log(`Coach: cache read ${read}, written ${written}, fresh ${usage.input_tokens}.`);
+      } catch (err) {
+        // Not our business — the stream is still the stream.
+      }
+    }
 
     /** The text a `data:` line carries, or "" for every other line. */
     function textOf(line) {
