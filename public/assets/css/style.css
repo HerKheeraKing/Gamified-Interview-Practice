@@ -1478,11 +1478,21 @@ main {
 
 /* Centred to match the hint-and-input column in Text Practice. All three
    stages put their content on the modal's centre line, so switching mode
-   doesn't shift the panel's visual axis. */
+   doesn't shift the panel's visual axis.
+
+   Centred on the cross axis *and* the main axis. .handoff-status keeps a
+   reserved min-height so the panel doesn't jump when the copy
+   confirmation appears, but that reservation is always at the bottom —
+   with only the panel's padding above, the block read top-heavy even
+   though its box was snug. The min-height gives the column room to
+   actually centre in, which balances the reserved slot against equal
+   space above it. */
 #stage-handoff:not([hidden]) {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
+  min-height: 200px;
   gap: 14px;
 }
 
