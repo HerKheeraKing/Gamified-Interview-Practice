@@ -204,10 +204,30 @@ html, body {
   isolation: isolate;
 }
 
+/* The glass reaches a full viewport above the header, and that overhang
+ * is deliberate.
+ *
+ * `position: sticky` only pins once the scroll position passes the
+ * element's natural offset. iOS rubber-band drives scrollY *negative*,
+ * which is before that threshold, so the header is not pinned during a
+ * bounce — it rides down with the page and leaves a strip of bare page
+ * background above it. On iPad that read as an empty gap tearing open
+ * over the nav.
+ *
+ * There is nothing to pin against there, so the answer is to give the
+ * exposed strip the header's own material instead. The overhang sits
+ * above the document origin, which is unreachable by normal scrolling
+ * and cannot be scrolled into, so it is invisible except during a
+ * bounce. Because it carries the identical background and blur, the
+ * seam has nowhere to show.
+ */
 .site-header::before {
   content: "";
   position: absolute;
-  inset: 0;
+  top: -100vh;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: -1;
   background: rgba(6, 5, 13, 0.72);
   backdrop-filter: blur(18px) saturate(120%);
