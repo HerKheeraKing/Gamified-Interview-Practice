@@ -9,7 +9,8 @@
  *   3. Detectives   - account rows + session tokens
  *   4. CaseLog      - XP entries, read and merge
  *   5. Coach        - the only place that holds the Anthropic API key
- *   6. Router       - maps requests to the layers above
+ *   6. Health       - is this deployment wired up? (bindings, schema)
+ *   7. Router       - maps requests to the layers above
  *
  * Everything that isn't /api/* falls through to the static assets
  * binding, so the Worker serves the whole site from one deployment.
@@ -468,10 +469,80 @@ const Coach = (() => {
 })();
 
 /* ---------------------------------------------------------- */
-/* 6. ROUTER                                                   */
+/* 6. HEALTH                                                   */
+/* ---------------------------------------------------------- */
+
+/**
+ * Answers "is this deployment wired up?" without needing an account.
+ *
+ * This exists because of a real outage: the Worker was renamed, the D1
+ * database was recreated, and the schema was never applied to the new
+ * one. Every API call died on `no such table: detectives`, and the
+ * router's catch-all flattened that into one opaque sentence — the site
+ * said the case files were unreachable while the binding was fine and
+ * the database was simply empty. Three plausible causes, no way to tell
+ * them apart from outside.
+ *
+ * The rule here: report presence, never contents. A missing secret is
+ * worth knowing about; its value is not something an unauthenticated
+ * route should ever be able to confirm.
+ */
+const Health = (() => {
+  /** Tables the Worker cannot function without. */
+  const REQUIRED_TABLES = ["detectives", "sessions", "case_log"];
+
+  async function read(env) {
+    const report = {
+      ok: false,
+      db_bound: Boolean(env.DB),
+      schema_ready: false,
+      missing_tables: REQUIRED_TABLES.slice(),
+      anthropic_key_set: Boolean(env.ANTHROPIC_API_KEY),
+    };
+
+    if (!report.db_bound) {
+      report.hint = "No DB binding. Check [[d1_databases]] in wrangler.toml, then redeploy.";
+      return report;
+    }
+
+    try {
+      const found = await env.DB.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?)"
+      )
+        .bind(...REQUIRED_TABLES)
+        .all();
+
+      const names = (found.results || []).map((row) => row.name);
+      report.missing_tables = REQUIRED_TABLES.filter((t) => !names.includes(t));
+      report.schema_ready = report.missing_tables.length === 0;
+      report.ok = report.schema_ready;
+
+      if (!report.schema_ready) {
+        report.hint = "Database is empty. Run: npm run db:init:remote";
+      }
+    } catch (err) {
+      report.hint = `Database unreachable: ${err.message}`;
+    }
+
+    return report;
+  }
+
+  return { read };
+})();
+
+/* ---------------------------------------------------------- */
+/* 7. ROUTER                                                   */
 /* ---------------------------------------------------------- */
 
 async function handleApi(request, env, path) {
+  // Deliberately unauthenticated and deliberately first: every other
+  // route needs the DB, so when the DB is the thing that's broken there
+  // is nowhere else to ask. Booleans only — this says whether the
+  // deployment is wired up, never what it is wired up to.
+  if (path === "/api/health" && request.method === "GET") {
+    return Responses.json(await Health.read(env));
+  }
+
   if (path === "/api/session" && request.method === "POST") {
     const body = await readJson(request);
     const session = await Detectives.openSession(env.DB, body.username, body.password);
@@ -540,7 +611,21 @@ export default {
     try {
       return await handleApi(request, env, path);
     } catch (err) {
-      console.error("API failure:", err);
+      // Log the route and the actual message, not just the object. The
+      // opaque version of this line cost an evening: `wrangler tail`
+      // showed "API failure" and nothing about which call or why.
+      console.error(`API failure [${request.method} ${path}]:`, err && err.message, err);
+
+      // A missing table is a deployment mistake, not an outage, and it
+      // is worth saying so — the user cannot fix it, but the person
+      // reading the screenshot can.
+      if (err && /no such table/i.test(String(err.message))) {
+        return Responses.fail(
+          "The case files haven't been set up yet — the database is empty. See /api/health.",
+          503
+        );
+      }
+
       return Responses.fail("The case files are unreachable right now.", 500);
     }
   },

@@ -94,6 +94,28 @@ npm run dev              # wrangler dev — Worker + local D1 + static assets
 npm run deploy
 ```
 
+### When login fails
+
+`GET /api/health` answers the three questions worth asking, without an
+account and without leaking anything:
+
+```json
+{ "ok": true, "db_bound": true, "schema_ready": true,
+  "missing_tables": [], "anthropic_key_set": true }
+```
+
+- `db_bound: false` — the `[[d1_databases]]` block is missing or the
+  deploy predates it. Fix `wrangler.toml`, redeploy.
+- `schema_ready: false` — the binding is fine and the database is empty.
+  Run `npm run db:init:remote`. **A `d1 create` makes an empty database;
+  the schema is a separate step, and renaming or recreating either the
+  Worker or the database does not carry it over.**
+- `anthropic_key_set: false` — only the two AI modes are affected, never
+  login. Run `npx wrangler secret put ANTHROPIC_API_KEY`. Secrets are
+  attached to a Worker *by name*, so a rename leaves them behind.
+
+`wrangler tail` logs the failing method and path alongside the error.
+
 ## AI practice modes
 
 Opening a case card shows a mode picker. It changes only the middle of the
