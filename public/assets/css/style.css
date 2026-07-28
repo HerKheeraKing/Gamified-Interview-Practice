@@ -1253,11 +1253,13 @@ main {
      Revoke — and both tabs end up with exactly the same breathing room
      without either field knowing what follows it.
 
-     The bottom value matches `.admin-bulk`'s 26px top margin, and the
-     two collapse to one 26px on the Revoke tab rather than stacking.
-     Stated on the button so the Generate tab, which has nothing under
-     it to supply a gap, ends up with the same space below as Revoke. */
-  margin: 40px auto 26px;
+     Nothing below, deliberately. On Revoke the gap under the button is
+     `.admin-bulk`'s own 26px top margin; on Generate the button is the
+     last thing in the panel and the modal's 30px bottom padding already
+     supplies one. A bottom margin here would only ever add to those —
+     it made Generate 56px against Revoke's 26px, which is the opposite
+     of matching them. */
+  margin: 40px auto 0;
   background: linear-gradient(90deg, rgba(140, 232, 176, 0.16), rgba(182, 245, 205, 0.26));
   border-color: rgba(182, 245, 205, 0.45);
   color: #dcfbe8;
