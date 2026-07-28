@@ -1895,11 +1895,24 @@ main {
    bottom of the box (flex + flex-end) so the newest words are always
    the ones visible, and a top mask fades the overflow out instead of
    hard-clipping it — it reads as older text scrolling out of view,
-   not text getting cut off mid-word. */
+   not text getting cut off mid-word.
+
+   The padding-top is the mask's own room, and has to match the fade
+   distance below. Without it the fade ate live text: the box only
+   grows to fit its content, so a two or three line caption is shorter
+   than the fade is long, and the first line — the whole caption, at
+   the start of a reply — came out half transparent. It read as
+   smudged rather than as faded, because nothing had scrolled away
+   yet. Faded now means only what it should: there is more above.
+
+   The margins are breathing room on both sides. The caption sits
+   between the state label and the controls and was close enough to
+   both to look like one crowded block. */
 .orb-caption {
-  margin: 10px 0 0;
-  min-height: 34px;
-  max-height: 114px;
+  margin: 20px 0 0;
+  padding-top: 16px;
+  min-height: 50px;
+  max-height: 130px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1908,19 +1921,22 @@ main {
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-muted);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px);
 }
 
 /* The two voice controls share a row so that Stop appearing and
    disappearing mid-reply doesn't shunt the panel up and down. The row
-   carries the spacing that used to sit on the toggle itself. */
+   carries the spacing that used to sit on the toggle itself, and
+   enough of it to keep the buttons off the last line of the caption —
+   they sit directly under running text and read as part of it when
+   the gap is tight. */
 .voice-actions {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  margin-top: 18px;
+  margin-top: 26px;
 }
 
 /* Stop — the .primary-btn recipe in red.
