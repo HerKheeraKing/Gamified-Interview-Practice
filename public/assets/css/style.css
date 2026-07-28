@@ -1114,6 +1114,15 @@ main {
   color: var(--danger);
 }
 
+/* The sign-in error holds its line open so the buttons under it don't
+   jump when a message arrives. The admin panel's error has nothing
+   under it to protect — it is the last thing on the Generate tab — so
+   reserving 18px and a 10px margin there just parks dead space beneath
+   the button and makes the two tabs sit differently. */
+#admin-error:empty {
+  display: none;
+}
+
 .login-actions {
   display: flex;
   gap: 12px;
@@ -1242,8 +1251,13 @@ main {
      value beats whatever bottom margin the field above happens to have
      — the spend cap row on Generate, the note under the code input on
      Revoke — and both tabs end up with exactly the same breathing room
-     without either field knowing what follows it. */
-  margin: 40px auto 0;
+     without either field knowing what follows it.
+
+     The bottom value matches `.admin-bulk`'s 26px top margin, and the
+     two collapse to one 26px on the Revoke tab rather than stacking.
+     Stated on the button so the Generate tab, which has nothing under
+     it to supply a gap, ends up with the same space below as Revoke. */
+  margin: 40px auto 26px;
   background: linear-gradient(90deg, rgba(140, 232, 176, 0.16), rgba(182, 245, 205, 0.26));
   border-color: rgba(182, 245, 205, 0.45);
   color: #dcfbe8;
