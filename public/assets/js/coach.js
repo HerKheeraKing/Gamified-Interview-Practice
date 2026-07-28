@@ -231,16 +231,9 @@ const Speaker = (() => {
   // enough not to be heard as a delay. See ready().
   const LIST_WAIT_MS = 400;
 
-  // The voice this page speaks with, decided once. See voice().
-  let chosen = null;
-
-  // getVoices() is empty until the browser has loaded its list, and the
-  // list is what the choice is made from. Warming it here means the
-  // choice is settled long before the first reply arrives, rather than
-  // being made — differently — by whichever sentence gets there first.
-  if (engine && typeof engine.addEventListener === "function") {
-    engine.addEventListener("voiceschanged", () => voice());
-  }
+  // The last voice reported to the console, so the report happens when
+  // the answer changes rather than on every reply. See announce().
+  let announced = null;
 
   function available() {
     return Boolean(engine);
@@ -324,10 +317,23 @@ const Speaker = (() => {
    * sentence seams. That is what "the volume and quality keep changing"
    * was.
    *
-   * Nothing is remembered until the list has something in it. An empty
-   * list is not a device with no voices, it is a device that hasn't
-   * answered yet, and memoising the guess would make the wrong answer
-   * permanent instead of momentary.
+   * The answer is *not* cached. It used to be — decided once and kept
+   * for the life of the page — and that quietly defeated the ranking.
+   * Chrome fires `voiceschanged` more than once: the local system
+   * voices arrive first and the network voices, which include every
+   * Google one, land in a later round. Deciding on the first event
+   * meant ranking a list the preferred voice wasn't in yet, settling
+   * for the next name down, and never looking again when the real
+   * answer turned up milliseconds later. The site asked for a British
+   * voice and spoke in an American one for the rest of the session.
+   *
+   * Consistency was the reason for caching, and it is already handled a
+   * layer up: Voice pins this for the length of a reply, so a reply
+   * cannot change voice partway through no matter what the list does.
+   * Asking again on the next reply is what lets a late-loading voice
+   * ever be used at all. The two rules are "the same voice for a whole
+   * reply" and "the best available voice at the start of one", and
+   * those need different scopes.
    *
    * The ranking is by character, not by where the voice runs. The
    * preferred voice is remote — synthesised on a server and fetched per
@@ -340,15 +346,34 @@ const Speaker = (() => {
    * voice nobody chose.
    */
   function voice() {
-    if (chosen) return chosen;
     if (!engine) return null;
 
     const english = engine.getVoices().filter((v) => v.lang && v.lang.startsWith("en"));
     if (english.length === 0) return null;
 
     const liked = ["Google UK English Female", "Samantha", "Microsoft Aria", "Microsoft Zira"];
-    chosen = byName(english, liked) || english[0] || null;
-    return chosen;
+    return announce(byName(english, liked) || english[0] || null);
+  }
+
+  /**
+   * Say which voice this is, once, whenever the answer changes.
+   *
+   * Which voice a machine ends up with depends on what it has installed
+   * and what has finished loading, so "why does it sound like that" is
+   * a question that can only be answered from the machine it sounds
+   * wrong on. One console line makes that answerable without a debug
+   * build. It reports the accent-carrying facts — the name and whether
+   * it came off the network — because those are what the question is
+   * usually really about.
+   */
+  function announce(picked) {
+    const name = picked ? picked.name : "the system default";
+    if (name !== announced) {
+      announced = name;
+      const where = picked && !picked.localService ? "network" : "on this device";
+      console.info(`Live Voice is speaking with: ${name} (${where}).`);
+    }
+    return picked;
   }
 
   function byName(voices, liked) {
