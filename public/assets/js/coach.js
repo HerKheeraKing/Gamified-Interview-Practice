@@ -206,9 +206,41 @@ const Coach = (() => {
  *
  * `say` resolves when the sentence has finished being spoken, which
  * is what lets Voice hold the microphone closed until then.
+ *
+ * One page, one voice. `voice()` decides which, once, and callers pin
+ * what it gives them for the length of a reply — see the comment on it
+ * for why choosing per utterance made a single reply audibly change
+ * speaker halfway through.
  */
 const Speaker = (() => {
   const engine = window.speechSynthesis || null;
+
+  /**
+   * Every utterance is set up identically. Left unset, `volume` and
+   * `pitch` take engine defaults that aren't guaranteed to match
+   * between one utterance and the next, and a reply is spoken as
+   * several — so they are stated rather than assumed. A seam between
+   * two utterances should be silence, not a change of speaker.
+   */
+  const RATE = 1.02;
+  const PITCH = 1.0;
+  const VOLUME = 1.0;
+
+  // How long to wait for the browser to hand over its voice list before
+  // speaking without one. Long enough for a list that's coming, short
+  // enough not to be heard as a delay. See ready().
+  const LIST_WAIT_MS = 400;
+
+  // The voice this page speaks with, decided once. See voice().
+  let chosen = null;
+
+  // getVoices() is empty until the browser has loaded its list, and the
+  // list is what the choice is made from. Warming it here means the
+  // choice is settled long before the first reply arrives, rather than
+  // being made — differently — by whichever sentence gets there first.
+  if (engine && typeof engine.addEventListener === "function") {
+    engine.addEventListener("voiceschanged", () => voice());
+  }
 
   function available() {
     return Boolean(engine);
@@ -232,7 +264,7 @@ const Speaker = (() => {
    * of word. No caller needs to know which kind of engine it got.
    */
   function say(text, on) {
-    const handlers = { spoken() {}, ...on };
+    const handlers = { spoken() {}, voice: undefined, ...on };
 
     if (!engine || !text.trim()) {
       handlers.spoken(text);
@@ -241,9 +273,17 @@ const Speaker = (() => {
 
     return new Promise((resolve) => {
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.voice = preferredVoice();
-      utterance.rate = 1.02;
-      utterance.pitch = 1.0;
+      // The caller's pinned voice, not a fresh choice — including when
+      // they pinned "no voice". An explicit null means the system
+      // default was what this reply started with and is what it will
+      // finish with; only `undefined`, meaning the caller never had an
+      // opinion, falls through to choosing here. Treating null as "ask
+      // again" is what let a reply that opened on the default finish on
+      // a named voice.
+      utterance.voice = handlers.voice === undefined ? voice() : handlers.voice;
+      utterance.rate = RATE;
+      utterance.pitch = PITCH;
+      utterance.volume = VOLUME;
 
       utterance.onboundary = (event) => {
         // Sentence boundaries repeat ground the word events already
@@ -273,22 +313,89 @@ const Speaker = (() => {
   }
 
   /**
-   * The nicest English voice this device happens to have. Voice lists
-   * are populated asynchronously and differ per OS, so this is a best
-   * effort with a documented fallback to the browser default.
+   * The voice this page speaks with. The same one every time it's asked.
+   *
+   * Decided once and remembered, because it used to be decided per
+   * utterance and a reply is several utterances. getVoices() returns an
+   * empty list until the browser has finished loading it, so the first
+   * sentence of a reply was picking from nothing and getting the system
+   * default while the third picked from a full list and got a named
+   * voice — one reply, two speakers, swapping back and forth at the
+   * sentence seams. That is what "the volume and quality keep changing"
+   * was.
+   *
+   * Nothing is remembered until the list has something in it. An empty
+   * list is not a device with no voices, it is a device that hasn't
+   * answered yet, and memoising the guess would make the wrong answer
+   * permanent instead of momentary.
+   *
+   * Local voices are preferred over remote ones. A remote voice is
+   * synthesised on a server and fetched per utterance, so its volume
+   * and quality vary with the network and every seam risks a stall; a
+   * local voice sounds identical every time it opens its mouth, which
+   * is the whole point of this function.
    */
-  function preferredVoice() {
-    const voices = engine.getVoices();
-    const english = voices.filter((v) => v.lang.startsWith("en"));
-    const liked = ["Google UK English Female", "Samantha", "Microsoft Aria", "Microsoft Zira"];
-    for (const name of liked) {
-      const match = english.find((v) => v.name.includes(name));
-      if (match) return match;
-    }
-    return english[0] || null;
+  function voice() {
+    if (chosen) return chosen;
+    if (!engine) return null;
+
+    const english = engine.getVoices().filter((v) => v.lang && v.lang.startsWith("en"));
+    if (english.length === 0) return null;
+
+    const liked = ["Samantha", "Microsoft Aria", "Microsoft Zira", "Google UK English Female"];
+    const local = english.filter((v) => v.localService);
+
+    chosen =
+      byName(local, liked) || byName(english, liked) || local[0] || english[0] || null;
+    return chosen;
   }
 
-  return { available, say, stop };
+  function byName(voices, liked) {
+    for (const name of liked) {
+      const match = voices.find((v) => v.name.includes(name));
+      if (match) return match;
+    }
+    return null;
+  }
+
+  /**
+   * Resolves once there is a voice list to choose from, or once it's
+   * clear there isn't going to be one.
+   *
+   * Callers await this before their first utterance so the choice is
+   * made from a loaded list rather than an empty one. Warming the list
+   * at load time almost always makes this resolve immediately; the wait
+   * is for the cold first reply, where the alternative is starting a
+   * sentence on the system default and finishing the reply on a named
+   * voice.
+   *
+   * It gives up rather than blocking forever. A device that never
+   * answers gets the system default for the whole reply, which is
+   * consistent — and consistency is the point, not any particular
+   * voice.
+   */
+  function ready() {
+    if (!engine || voice()) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        voice();
+        resolve();
+      };
+      const timer = setTimeout(done, LIST_WAIT_MS);
+      if (typeof engine.addEventListener === "function") {
+        engine.addEventListener("voiceschanged", done);
+      }
+    });
+  }
+
+  return { available, say, stop, voice, ready };
 })();
 
 /* ---------------------------------------------------------- */
@@ -490,6 +597,18 @@ const Voice = (() => {
   const SILENCE_MS = 5000;
   const SENTENCE_END = /([.!?])\s/;
 
+  /**
+   * The most text to hand the synthesiser at once, in characters.
+   *
+   * Roughly twenty seconds of speech. Browsers have a long history of
+   * cutting off utterances longer than that and needing a pause/resume
+   * poke to keep going, and a reply that goes silent partway is worse
+   * than one with a join in it. The join is now inaudible — same voice,
+   * same volume, drained the instant the speaker frees up — so this
+   * costs nothing to be careful about. See take().
+   */
+  const MAX_UTTERANCE = 320;
+
   let session = null;
 
   function supported() {
@@ -516,7 +635,14 @@ const Voice = (() => {
       messages: [],
       recogniser: null,
       silence: null,
-      spoken: Promise.resolve(),
+      // The speaking side: text waiting to be spoken, whether an
+      // utterance is playing, whether Coach has finished sending, what
+      // to run when both are done, and the one voice this reply uses.
+      queue: "",
+      speaking: false,
+      streamed: false,
+      finished: null,
+      voice: undefined,
       state: "idle",
       mic: false,
       // Which turn is currently the live one. See respondTo.
@@ -588,7 +714,10 @@ const Voice = (() => {
     clearTimeout(session.silence);
     quiet();
     Speaker.stop();
-    session.spoken = Promise.resolve();
+    session.queue = "";
+    session.speaking = false;
+    session.streamed = false;
+    session.finished = null;
   }
 
   function listening() {
@@ -758,13 +887,19 @@ const Voice = (() => {
    * over a reply, or when a stray transcript arrives late.
    */
   function respondTo(said) {
-    endTurn();
-
+    // The number moves first, so anything still running from the last
+    // turn is already superseded when endTurn tears it down and can't
+    // mistake this turn's state for its own.
     const turn = ++session.turn;
     const live = () => Boolean(session) && session.turn === turn;
+    endTurn();
 
     session.caption = "";
     session.aloud = "";
+    // One voice for the whole reply, pinned by the first utterance and
+    // reused by every one after it. Asking per utterance is what made a
+    // single reply switch speaker at the sentence joins.
+    session.voice = undefined;
     setState("thinking");
     session.messages.push({ role: "user", content: said });
 
@@ -783,7 +918,7 @@ const Voice = (() => {
         // Note what does *not* happen here: the caption is not written
         // from `reply`. See speak() — the words appear at the pace they
         // are spoken, not the pace they arrive.
-        pending = absorb(pending + chunk, turn);
+        pending = absorb(pending + chunk);
       },
 
       grades(grades) {
@@ -792,8 +927,9 @@ const Voice = (() => {
 
       done() {
         if (!live()) return;
-        speak(pending, turn);
+        enqueue(pending);
         pending = "";
+        session.streamed = true;
         // Note where the reply is *not* recorded: here. The stream ends
         // long before the voice does, and a turn stopped in between has
         // to go into the history as the part that was actually heard —
@@ -803,8 +939,7 @@ const Voice = (() => {
         // the heard part underneath it.
         //
         // The microphone is closed for the whole of the reply and opens
-        // again here, one tick after the last sentence finishes playing
-        // — `spoken` is the queue of utterances, so it settles when the
+        // again in here, once the queue has drained — which is when the
         // voice stops, not when the text stopped arriving. That is the
         // only path back to listening: nothing the candidate does while
         // Claude is talking can reopen the mic early, and leaving it
@@ -813,12 +948,12 @@ const Voice = (() => {
         // A typed turn with the mic closed still gets spoken — it just
         // falls back to idle afterwards instead of opening a microphone
         // nobody asked for.
-        session.spoken.then(() => {
-          if (!live() || session.state !== "speaking") return;
-          // Every sentence was spoken, so the reply as written is the
-          // reply as heard — recorded from `reply` rather than the
-          // caption, which loses the original spacing at the sentence
-          // joins it was split on.
+        session.finished = () => {
+          if (!live()) return;
+          // Everything was spoken, so the reply as written is the reply
+          // as heard — recorded from `reply` rather than the caption,
+          // which loses the original spacing at the joins it was split
+          // on.
           session.messages.push({ role: "assistant", content: reply });
           session.on.said(session.aloud);
           if (session.mic) {
@@ -826,7 +961,11 @@ const Voice = (() => {
           } else {
             setState("idle");
           }
-        });
+        };
+        // The queue may already be empty and silent — a reply short
+        // enough to have been spoken while the stream finished, or one
+        // with nothing in it at all — and nothing else would call this.
+        pump();
       },
 
       error(message) {
@@ -841,58 +980,132 @@ const Voice = (() => {
     });
   }
 
-  /** Speak every complete sentence in `buffer`, return what's left over. */
-  function absorb(buffer, turn) {
+  /** Queue every complete sentence in `buffer`, return what's left over. */
+  function absorb(buffer) {
     let rest = buffer;
     while (true) {
       const boundary = rest.search(SENTENCE_END);
       if (boundary === -1) return rest;
-      speak(rest.slice(0, boundary + 1), turn);
+      enqueue(rest.slice(0, boundary + 1));
       rest = rest.slice(boundary + 2);
     }
   }
 
+  /** Add finished text to what's waiting to be spoken. */
+  function enqueue(text) {
+    if (!session || !text.trim()) return;
+    session.queue = joined(session.queue, text.trim());
+    pump();
+  }
+
   /**
-   * Queue a sentence behind the ones already speaking, and caption it as
-   * it is spoken.
+   * Speak what's waiting, if nothing is speaking already.
+   *
+   * The queue is drained in as few utterances as it can be, not one per
+   * sentence. Every utterance is a fresh handoff to the synthesiser, and
+   * a reply cut into six of them is six chances for the engine to come
+   * back at a different volume or on a different voice — which is what
+   * a reply that "changes character halfway through" is made of. One
+   * utterance has no seams to hear.
+   *
+   * Sentences are still released the moment they complete, so the first
+   * words come out while the rest of the reply is still being written
+   * and time-to-first-word is unchanged. The difference is only in what
+   * happens to the sentences behind it: instead of each being handed
+   * over on its own, they collect while the current utterance plays and
+   * go as one when it ends. A reply typically speaks as two utterances —
+   * the opening sentence, then the remainder — with no gap between them,
+   * because the queue is drained the instant the speaker frees up.
    *
    * The caption is built from what has actually left the speaker, never
    * from what has arrived from Coach. Those run at wildly different
    * speeds: the stream lands a whole reply in a second or two, while the
-   * voice takes twenty to read it. Captioning the stream dumped the
-   * finished paragraph on screen and left the voice reading text the
-   * candidate had already finished — and, past six lines, reading text
-   * that had already scrolled out of the cap. Captioning the speech
-   * keeps the words and the sound on the same clock, which is what the
-   * live transcript on the candidate's own side already does.
-   *
-   * The turn is checked again when the queue reaches this sentence, not
-   * only when it joins: a sentence can wait behind several others, and
-   * by the time its turn to be spoken arrives the conversation may have
-   * moved on to a newer one.
+   * voice takes twenty to read it.
    */
-  function speak(text, turn) {
-    if (!text.trim()) return;
+  function pump() {
+    if (!session || session.speaking) return;
 
-    session.spoken = session.spoken.then(() => {
-      if (!session || session.turn !== turn) return undefined;
+    const text = take();
+    if (!text) {
+      if (session.streamed) settle();
+      return;
+    }
 
-      // Sentences before this one are already captioned and stay put;
-      // this one grows onto the end of them.
-      const before = session.caption;
+    const turn = session.turn;
+    // Text spoken before this utterance is already captioned and stays
+    // put; this one grows onto the end of it.
+    const before = session.caption;
+    session.speaking = true;
 
-      return Speaker.say(text, {
-        spoken(prefix) {
-          if (!session || session.turn !== turn) return;
-          session.aloud = joined(before, prefix);
-          session.on.said(session.aloud, { partial: true });
-        },
-      }).then(() => {
+    // Waiting on the voice list only ever happens before the first
+    // utterance of the first reply — after that a voice is pinned and
+    // this resolves in the same tick. Speaking first and choosing later
+    // is what made a reply change speaker mid-way.
+    Speaker.ready()
+      .then(() => {
+        if (!session || session.turn !== turn) return undefined;
+        // Pinned once per reply, and `undefined` is the only thing that
+        // counts as unpinned. If the list still hadn't loaded when this
+        // reply started, the whole reply speaks in the system default
+        // rather than changing voice the moment the list turns up.
+        if (session.voice === undefined) session.voice = Speaker.voice();
+
+        return Speaker.say(text, {
+          // The turn's voice. Every utterance in a reply is the same
+          // speaker at the same volume because they are all handed the
+          // same one, and `say` never chooses over the top of it.
+          voice: session.voice,
+          spoken(prefix) {
+            if (!session || session.turn !== turn) return;
+            session.aloud = joined(before, prefix);
+            session.on.said(session.aloud, { partial: true });
+          },
+        });
+      })
+      .then(() => {
+        // A superseded turn leaves `speaking` alone: endTurn already
+        // reset it for whoever came next, and clearing it here would be
+        // this turn reaching into theirs.
         if (!session || session.turn !== turn) return;
         session.caption = joined(before, text);
         session.aloud = session.caption;
+        session.speaking = false;
+        pump();
       });
-    });
+  }
+
+  /**
+   * As much of the queue as one utterance should carry, cut at a
+   * sentence end.
+   *
+   * Uncapped is tempting — one utterance for the whole reply, no seams
+   * at all — but engines are known to stop partway through very long
+   * ones, and a reply that goes silent is worse than a reply with a
+   * join in it. The cap is high enough that a normal coaching reply
+   * still speaks as one or two utterances.
+   */
+  function take() {
+    const all = session.queue;
+    if (all.length <= MAX_UTTERANCE) {
+      session.queue = "";
+      return all;
+    }
+
+    const ends = [...all.slice(0, MAX_UTTERANCE).matchAll(/[.!?]\s/g)];
+    const cut = ends.length > 0 ? ends[ends.length - 1].index + 1 : MAX_UTTERANCE;
+    session.queue = all.slice(cut).trim();
+    return all.slice(0, cut).trim();
+  }
+
+  /**
+   * The reply is finished and fully spoken. Runs once — whatever was
+   * waiting on the end of the speech is handed the turn and dropped, so
+   * a later pump on an empty queue can't run it twice.
+   */
+  function settle() {
+    const done = session.finished;
+    session.finished = null;
+    if (done) done();
   }
 
   function joined(before, part) {
