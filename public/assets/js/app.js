@@ -505,6 +505,7 @@ const Practice = (() => {
       if (e.key === "Enter") send();
     });
 
+    document.getElementById("practice-mic").addEventListener("click", toggleDictation);
     document.getElementById("voice-toggle").addEventListener("click", toggleVoice);
     document.getElementById("handoff-copy").addEventListener("click", copyPrompt);
   }
@@ -512,6 +513,7 @@ const Practice = (() => {
   /** Start a fresh session for `question`, or tear everything down with null. */
   function reset(nextQuestion) {
     endVoice();
+    endDictation();
     question = nextQuestion;
     mode = null;
     transcript = [];
@@ -533,6 +535,7 @@ const Practice = (() => {
     }
 
     endVoice();
+    endDictation();
     mode = next;
     waiting = false;
 
@@ -548,6 +551,19 @@ const Practice = (() => {
     document.getElementById("practice-panel").hidden = false;
     document.getElementById("practice-input").placeholder =
       mode === "voice" ? "Or type a quick question…" : "Type your answer and hit enter";
+
+    // Dictation is a Text Practice convenience. Live Voice already has a
+    // microphone, and a second one next to it would be two buttons doing
+    // visibly different things with the same icon.
+    document.getElementById("practice-mic").hidden =
+      mode !== "text" || !Dictation.supported();
+
+    // Voice mode opens the conversation immediately but not the
+    // microphone — a typed aside is a valid first turn, and it shouldn't
+    // have to trigger a permission prompt to be heard.
+    if (mode === "voice" && Voice.supported()) {
+      Voice.attach(question, voiceHandlers());
+    }
 
     note(openingNote());
 
@@ -594,15 +610,25 @@ const Practice = (() => {
     const input = document.getElementById("practice-input");
     const said = input.value.trim();
     if (!said || waiting) return;
-    input.value = "";
+
+    // Dictating and then sending shouldn't leave the microphone running
+    // over the top of the reply.
+    endDictation();
 
     // In voice mode the composer is a side channel into the same
-    // conversation, so Voice takes it and keeps its own turn order.
+    // conversation, so Voice takes it and answers out loud. It only
+    // declines when there's no conversation to add to — an unsupported
+    // browser — and that has to be said rather than swallowed.
     if (mode === "voice") {
-      Voice.submit(said);
+      if (Voice.submit(said)) {
+        input.value = "";
+      } else {
+        note(openingNote() || "Live Voice needs a browser with a speech engine — try Chrome or Edge.");
+      }
       return;
     }
 
+    input.value = "";
     say("user", said);
     transcript.push({ role: "user", content: said });
     ask();
@@ -657,21 +683,8 @@ const Practice = (() => {
 
   /* ---- voice mode ---- */
 
-  function toggleVoice() {
-    if (live) {
-      endVoice();
-      return;
-    }
-
-    if (!Identity.isSignedIn() || !Voice.supported()) {
-      note(openingNote());
-      return;
-    }
-
-    live = true;
-    document.getElementById("voice-toggle").textContent = "End the session";
-
-    Voice.start(question, {
+  function voiceHandlers() {
+    return {
       state(state) {
         setOrb(state, LABELS[state], null);
       },
@@ -683,7 +696,32 @@ const Practice = (() => {
       },
       grades: ScoreModal.applyGrades,
       error: note,
-    });
+    };
+  }
+
+  /**
+   * Opens and closes the microphone, not the conversation. `choose`
+   * already attached one, so a typed aside works before this is ever
+   * clicked and the history survives closing the mic again.
+   */
+  function toggleVoice() {
+    if (live) {
+      endVoice();
+      return;
+    }
+
+    if (!Identity.isSignedIn() || !Voice.supported()) {
+      note(openingNote());
+      return;
+    }
+
+    if (!Voice.attached()) {
+      Voice.attach(question, voiceHandlers());
+    }
+
+    live = true;
+    document.getElementById("voice-toggle").textContent = "End the session";
+    Voice.openMic();
   }
 
   function endVoice() {
@@ -711,6 +749,55 @@ const Practice = (() => {
     if (caption !== null && caption !== undefined) {
       document.getElementById("orb-caption").textContent = caption;
     }
+  }
+
+  /* ---- dictation (text mode) ---- */
+
+  /**
+   * Speaking into the answer box.
+   *
+   * Whatever was already typed is held as a prefix and the transcript is
+   * appended to it, because the recogniser revises its own earlier words
+   * as it hears more — it hands back the whole utterance every time, not
+   * a delta. Keeping the typed part separate is what lets the spoken
+   * part be rewritten underneath it without eating what came before.
+   *
+   * The answer is left in the box rather than sent. Reviewing it is the
+   * point: dictation is a faster way to draft, not a second Live Voice.
+   */
+  function toggleDictation() {
+    if (Dictation.active()) {
+      endDictation();
+      return;
+    }
+
+    const input = document.getElementById("practice-input");
+    const typed = input.value.trim();
+    const prefix = typed ? `${typed} ` : "";
+
+    setMic(true);
+    Dictation.start({
+      text(transcript) {
+        input.value = prefix + transcript;
+      },
+      end() {
+        setMic(false);
+        input.focus();
+      },
+      error: note,
+    });
+  }
+
+  function endDictation() {
+    Dictation.stop();
+    setMic(false);
+  }
+
+  function setMic(on) {
+    const button = document.getElementById("practice-mic");
+    button.classList.toggle("recording", on);
+    button.setAttribute("aria-pressed", String(on));
+    button.title = on ? "Stop dictating" : "Speak your answer instead of typing";
   }
 
   /* ---- handoff mode ---- */

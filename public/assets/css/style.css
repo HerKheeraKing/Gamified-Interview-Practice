@@ -1349,6 +1349,51 @@ main {
   box-shadow: 0 0 14px rgba(125, 211, 252, 0.3);
 }
 
+/* Dictation toggle. Quiet by default — it's a shortcut, not the primary
+   action — and it borrows the orb's coral-free cyan pulse while running
+   so "the microphone is live" reads the same everywhere on the site. */
+.mic-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.mic-btn[hidden] { display: none; }
+
+.mic-btn:hover {
+  border-color: var(--border-glow);
+  color: var(--text-primary);
+}
+
+.mic-btn.recording {
+  border-color: rgba(200, 245, 255, 0.75);
+  background: rgba(125, 211, 252, 0.18);
+  color: #eaf9ff;
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(125, 211, 252, 0.35); }
+  50%      { box-shadow: 0 0 18px rgba(125, 211, 252, 0.8); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mic-btn.recording {
+    animation: none;
+    box-shadow: 0 0 14px rgba(125, 211, 252, 0.6);
+  }
+}
+
 .composer-btn {
   flex: 0 0 auto;
   background: linear-gradient(90deg, rgba(125, 211, 252, 0.32), rgba(165, 230, 255, 0.42));

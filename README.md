@@ -103,8 +103,8 @@ manually adjustable no matter which one filled them.
 
 | Mode | What it does | Cost |
 | --- | --- | --- |
-| Text Practice | Type an answer, Claude streams back coaching plus a follow-up and fills the score dots | API |
-| Live Voice | The same conversation held out loud, with a glass orb for idle / listening / thinking / speaking. A text box stays open for a typed aside without breaking voice flow | API |
+| Text Practice | Type an answer — or dictate it with the mic button and edit before sending. Claude streams back coaching plus a follow-up and fills the score dots | API |
+| Live Voice | The same conversation held out loud, with a glass orb for idle / listening / thinking / speaking. A text box stays open for a typed aside, which is answered out loud like any other turn | API |
 | Send to Claude | Copies the question plus a full interviewer prompt to the clipboard. Practise in any Claude session, come back, score by hand | free |
 
 ### The API key never reaches the browser
@@ -133,14 +133,31 @@ The Claude API is text in, text out. There is no audio endpoint to stream
 a microphone into and no model that returns speech, so speech-to-speech is
 assembled in `coach.js` from three pieces:
 
-1. `Voice` runs continuous browser speech recognition and ends the turn on
-   ~1.4s of silence, the same beat an interviewer waits — no push-to-talk.
+1. `Voice` runs continuous browser speech recognition and ends the turn
+   after 5s of silence — no push-to-talk. That's far longer than a chat
+   app would use, deliberately: this is someone assembling an interview
+   answer out loud, and the pause while they work out how to phrase the
+   result of a STAR story runs several seconds. A turn that ends late
+   costs a few seconds; a turn that ends early costs the answer.
 2. `Coach` streams the reply token by token from the Worker.
 3. `Speaker` starts talking at the **first finished sentence**, not the
    last, so time-to-first-word stays under a second.
 
 The microphone is closed while `Speaker` talks, otherwise the reply gets
 transcribed as if the candidate had said it.
+
+The session and the microphone are separate. Entering the mode attaches
+a conversation; the mic button opens listening inside it. A typed aside
+is a turn in that same conversation and is answered out loud like any
+other — so it works before the mic is ever opened, without triggering a
+permission prompt just to ask a clarifying question.
+
+`Dictation` is a separate module from `Voice` despite driving the same
+recogniser. Voice owns turn-taking, synthesis and a conversation with
+Coach; Text Practice wants none of that — just words in a box to review
+before sending. It also needs less to run: `Voice` requires a speech
+*synthesiser*, dictation has nothing to say out loud, so the mic button
+works in browsers where full voice practice can't.
 
 `Speaker` is the seam. It drives the browser's own voice today, which
 costs nothing and needs no key. Swapping in ElevenLabs means rewriting its

@@ -4,10 +4,11 @@
  * AI practice: the three ways to work a case.
  *
  * Structure:
- *   1. Coach    - one interviewer turn, streamed. Knows HTTP, not the DOM.
- *   2. Speaker  - turns text into sound. The seam for a better voice.
- *   3. Voice    - mic in, spoken reply out, as a state machine.
- *   4. Handoff  - the no-cost path: a prompt on the clipboard.
+ *   1. Coach     - one interviewer turn, streamed. Knows HTTP, not the DOM.
+ *   2. Speaker   - turns text into sound. The seam for a better voice.
+ *   3. Voice     - mic in, spoken reply out, as a state machine.
+ *   4. Dictation - mic in, text out. Speaking instead of typing.
+ *   5. Handoff   - the no-cost path: a prompt on the clipboard.
  *
  * Loaded before app.js, which is the only consumer. Nothing in here
  * touches the modal, the score dots, or the XP log — app.js decides
@@ -259,6 +260,14 @@ const Speaker = (() => {
 /* ---------------------------------------------------------- */
 
 /**
+ * The browser's speech recogniser, shared by the two modules that want
+ * it for different reasons: Voice holds a conversation with it, and
+ * Dictation below just types with it. Neither owns the constructor,
+ * because neither is more entitled to it than the other.
+ */
+const SpeechEngine = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+/**
  * A spoken conversation, as a four-state machine.
  *
  *   idle → listening → thinking → speaking → listening → …
@@ -280,25 +289,45 @@ const Speaker = (() => {
  *
  * The microphone is closed while Speaker talks. Leaving it open means
  * the reply is transcribed as if the candidate had said it.
+ *
+ * The session and the microphone are separate things. `attach` opens a
+ * conversation, `openMic` starts listening in it, and a typed aside is
+ * a turn in the same conversation whether the microphone was ever
+ * opened or not — the reply is spoken either way, because the point of
+ * this mode is to be talked to.
  */
 const Voice = (() => {
-  const Recogniser = window.SpeechRecognition || window.webkitSpeechRecognition || null;
-  const SILENCE_MS = 1400;
+  /**
+   * How long a pause has to run before the turn is treated as over.
+   *
+   * Deliberately far longer than a chat app would use. This is someone
+   * assembling an interview answer out loud, and the pause while they
+   * decide how to phrase the result of a STAR story is easily several
+   * seconds. Cutting in at a conversational beat teaches them to rush,
+   * which is the opposite of the point. A turn that ends late costs a
+   * few seconds; a turn that ends early costs the answer.
+   */
+  const SILENCE_MS = 5000;
   const SENTENCE_END = /([.!?])\s/;
 
   let session = null;
 
   function supported() {
-    return Boolean(Recogniser && Speaker.available());
+    return Boolean(SpeechEngine && Speaker.available());
+  }
+
+  function attached() {
+    return Boolean(session);
   }
 
   /**
-   * Begin a session for one case.
+   * Open a conversation about one case. Does not touch the microphone —
+   * typed asides work immediately, and `openMic` adds speech on top.
    *
    * @param question  the case question, for Coach's system prompt
    * @param on        { state, heard, said, grades, error }
    */
-  function start(question, on) {
+  function attach(question, on) {
     stop();
 
     session = {
@@ -309,28 +338,46 @@ const Voice = (() => {
       silence: null,
       spoken: Promise.resolve(),
       state: "idle",
+      mic: false,
     };
+  }
 
+  /** Start listening. The conversation must already be attached. */
+  function openMic() {
+    if (!session) return;
+    session.mic = true;
     listen();
   }
 
-  /** End the session and release the microphone. */
-  function stop() {
+  /** Stop listening but keep the conversation and its history. */
+  function closeMic() {
     if (!session) return;
+    session.mic = false;
     clearTimeout(session.silence);
     quiet();
     Speaker.stop();
     setState("idle");
+  }
+
+  /** End the conversation entirely and release the microphone. */
+  function stop() {
+    if (!session) return;
+    closeMic();
     session = null;
   }
 
-  /** Send typed text as if it had been spoken — the clarifying-question path. */
+  /**
+   * Take a typed turn. Same conversation, same spoken reply — the text
+   * box is a quieter way to talk, not a way out of the voice flow.
+   * False when there's no conversation to add it to.
+   */
   function submit(text) {
-    if (!session || !text.trim()) return;
+    if (!session || !text.trim()) return false;
     clearTimeout(session.silence);
     quiet();
     session.on.heard(text);
     respondTo(text);
+    return true;
   }
 
   function listening() {
@@ -342,7 +389,7 @@ const Voice = (() => {
   function listen() {
     if (!session) return;
 
-    const recogniser = new Recogniser();
+    const recogniser = new SpeechEngine();
     recogniser.continuous = true;
     recogniser.interimResults = true;
     recogniser.lang = "en-US";
@@ -373,7 +420,9 @@ const Voice = (() => {
     recogniser.onerror = (event) => {
       if (event.error === "not-allowed") {
         session.on.error("Microphone access was blocked. Allow it, then try again.");
-        stop();
+        // Close the microphone, not the conversation — typing still works
+        // and the history is still worth keeping.
+        closeMic();
       }
       // "no-speech" and "aborted" are ordinary silence, not failures.
     };
@@ -448,16 +497,27 @@ const Voice = (() => {
         session.messages.push({ role: "assistant", content: reply });
         session.on.said(reply);
         // Listening resumes only once the last sentence is out, so the
-        // microphone never hears the interviewer.
+        // microphone never hears the interviewer. A typed turn with the
+        // mic closed still gets spoken — it just falls back to idle
+        // afterwards instead of opening a microphone nobody asked for.
         session.spoken.then(() => {
-          if (session && session.state === "speaking") listen();
+          if (!session || session.state !== "speaking") return;
+          if (session.mic) {
+            listen();
+          } else {
+            setState("idle");
+          }
         });
       },
 
       error(message) {
         if (!session) return;
         session.on.error(message);
-        listen();
+        if (session.mic) {
+          listen();
+        } else {
+          setState("idle");
+        }
       },
     });
   }
@@ -485,11 +545,108 @@ const Voice = (() => {
     session.on.state(state);
   }
 
-  return { supported, start, stop, submit, listening };
+  return { supported, attached, attach, openMic, closeMic, stop, submit, listening };
 })();
 
 /* ---------------------------------------------------------- */
-/* 4. HANDOFF                                                  */
+/* 4. DICTATION                                                */
+/* ---------------------------------------------------------- */
+
+/**
+ * Speaking instead of typing. Nothing more.
+ *
+ * Kept apart from Voice on purpose, even though both drive the same
+ * recogniser. Voice owns turn-taking, speech synthesis, and a
+ * conversation with Coach; none of that belongs in Text Practice, where
+ * the microphone is a convenience and the answer still sits in a box
+ * waiting to be read over and edited before it's sent. Folding this
+ * into Voice would mean a flag threaded through every one of those
+ * behaviours to switch them all off.
+ *
+ * It also needs less to work: Voice is unavailable without a speech
+ * *synthesiser*, but dictation has nothing to say out loud, so it runs
+ * in browsers where full voice practice can't.
+ *
+ * The transcript goes out through a callback rather than being written
+ * to a field directly — which element it lands in is the caller's
+ * business, and keeping it that way means this never has to know the
+ * modal exists.
+ */
+const Dictation = (() => {
+  let recogniser = null;
+
+  function supported() {
+    return Boolean(SpeechEngine);
+  }
+
+  function active() {
+    return Boolean(recogniser);
+  }
+
+  /**
+   * Start transcribing.
+   *
+   * @param on  { text(transcript), end(), error(message) }
+   *            `text` fires on every revision, including interim ones,
+   *            and always carries the whole utterance rather than a
+   *            delta — the recogniser rewrites earlier words as later
+   *            context arrives, so appending fragments would strand the
+   *            corrections it makes.
+   */
+  function start(on) {
+    stop();
+    const handlers = { text() {}, end() {}, error() {}, ...on };
+
+    const engine = new SpeechEngine();
+    engine.continuous = true;
+    engine.interimResults = true;
+    engine.lang = "en-US";
+
+    engine.onresult = (event) => {
+      let transcript = "";
+      for (const result of event.results) {
+        transcript += result[0].transcript;
+      }
+      handlers.text(transcript.trim());
+    };
+
+    engine.onerror = (event) => {
+      if (event.error === "not-allowed") {
+        handlers.error("Microphone access was blocked. Allow it, then try again.");
+      }
+    };
+
+    // No auto-restart, unlike Voice. Dictation ends when the speaker
+    // stops or clicks the button — there is no turn to hold open.
+    engine.onend = () => {
+      if (recogniser !== engine) return;
+      recogniser = null;
+      handlers.end();
+    };
+
+    recogniser = engine;
+    try {
+      engine.start();
+    } catch (err) {
+      recogniser = null;
+      handlers.error("Couldn't open the microphone.");
+      handlers.end();
+    }
+  }
+
+  function stop() {
+    if (!recogniser) return;
+    const engine = recogniser;
+    recogniser = null;
+    engine.onend = null;
+    engine.stop();
+  }
+
+  return { supported, active, start, stop };
+})();
+
+/* ---------------------------------------------------------- */
+/* 5. HANDOFF                                                  */
 /* ---------------------------------------------------------- */
 
 /**
