@@ -483,6 +483,8 @@ const Voice = (() => {
       spoken: Promise.resolve(),
       state: "idle",
       mic: false,
+      // Which turn is currently the live one. See respondTo.
+      turn: 0,
     };
   }
 
@@ -501,10 +503,12 @@ const Voice = (() => {
   function closeMic() {
     if (!session) return;
     session.mic = false;
-    clearTimeout(session.silence);
-    quiet();
+    // Retiring the turn number orphans any stream still arriving, so a
+    // reply that was in flight when the mic closed can't finish speaking
+    // into a session the detective has already stepped out of.
+    session.turn++;
+    endTurn();
     Microphones.release();
-    Speaker.stop();
     setState("idle");
   }
 
@@ -522,11 +526,25 @@ const Voice = (() => {
    */
   function submit(text) {
     if (!session || !text.trim()) return false;
-    clearTimeout(session.silence);
-    quiet();
     session.on.heard(text);
     respondTo(text);
     return true;
+  }
+
+  /**
+   * Everything the previous turn still had running.
+   *
+   * A turn owns the microphone, a stream from Coach and a queue of
+   * sentences waiting to be spoken. Starting the next one without
+   * ending all three leaves two interviewers talking over each other,
+   * so this is called at the top of every turn rather than trusted to
+   * happen on its own.
+   */
+  function endTurn() {
+    clearTimeout(session.silence);
+    quiet();
+    Speaker.stop();
+    session.spoken = Promise.resolve();
   }
 
   function listening() {
@@ -597,25 +615,57 @@ const Voice = (() => {
     }
   }
 
+  /**
+   * Take the microphone out of the conversation.
+   *
+   * Every handler comes off, not just `onend`. `stop()` flushes what the
+   * recogniser was still holding, and that arrives as one last `onresult`
+   * *after* this function returns — which used to re-caption the orb with
+   * the candidate's words over the top of Claude's reply and re-arm the
+   * silence timer, opening a second turn on the tail of the first. Two
+   * turns meant two streams and two voices, the second of them answering
+   * a fragment and so sounding like a canned "that wasn't an answer".
+   *
+   * `abort()` rather than `stop()` for the same reason: there is nothing
+   * left to flush that this conversation still wants.
+   */
   function quiet() {
     if (!session || !session.recogniser) return;
     const recogniser = session.recogniser;
     session.recogniser = null;
+    recogniser.onresult = null;
+    recogniser.onerror = null;
     recogniser.onend = null;
-    recogniser.stop();
+    recogniser.abort();
   }
 
   function finishTurn(transcript) {
     const said = transcript.trim();
-    if (!session || !said) return;
-    quiet();
+    // Only a listening session has a turn to finish. A timer that fired
+    // as the state moved on is describing a turn that is already over.
+    if (!session || !said || session.state !== "listening") return;
     session.on.heard(said);
     respondTo(said);
   }
 
   /* ---- the reply ---- */
 
+  /**
+   * Answer one thing the candidate said.
+   *
+   * Each turn takes a number, and every callback below checks it is
+   * still the current one before it speaks, scores or captions. There
+   * is exactly one voice per turn because a superseded stream finds the
+   * number has moved on and returns without touching anything — the
+   * tokens are what make a turn cancellable when the candidate types
+   * over a reply, or when a stray transcript arrives late.
+   */
   function respondTo(said) {
+    endTurn();
+
+    const turn = ++session.turn;
+    const live = () => Boolean(session) && session.turn === turn;
+
     setState("thinking");
     session.messages.push({ role: "user", content: said });
 
@@ -625,23 +675,23 @@ const Voice = (() => {
 
     Coach.ask(session.question, session.messages, {
       text(chunk) {
-        if (!session) return;
+        if (!live()) return;
         if (!started) {
           started = true;
           setState("speaking");
         }
         reply += chunk;
-        pending = absorb(pending + chunk);
+        pending = absorb(pending + chunk, turn);
         session.on.said(reply, { partial: true });
       },
 
       grades(grades) {
-        if (session) session.on.grades(grades);
+        if (live()) session.on.grades(grades);
       },
 
       done() {
-        if (!session) return;
-        speak(pending);
+        if (!live()) return;
+        speak(pending, turn);
         pending = "";
         session.messages.push({ role: "assistant", content: reply });
         session.on.said(reply);
@@ -650,7 +700,7 @@ const Voice = (() => {
         // mic closed still gets spoken — it just falls back to idle
         // afterwards instead of opening a microphone nobody asked for.
         session.spoken.then(() => {
-          if (!session || session.state !== "speaking") return;
+          if (!live() || session.state !== "speaking") return;
           if (session.mic) {
             listen();
           } else {
@@ -660,7 +710,7 @@ const Voice = (() => {
       },
 
       error(message) {
-        if (!session) return;
+        if (!live()) return;
         session.on.error(message);
         if (session.mic) {
           listen();
@@ -672,20 +722,30 @@ const Voice = (() => {
   }
 
   /** Speak every complete sentence in `buffer`, return what's left over. */
-  function absorb(buffer) {
+  function absorb(buffer, turn) {
     let rest = buffer;
     while (true) {
       const boundary = rest.search(SENTENCE_END);
       if (boundary === -1) return rest;
-      speak(rest.slice(0, boundary + 1));
+      speak(rest.slice(0, boundary + 1), turn);
       rest = rest.slice(boundary + 2);
     }
   }
 
-  /** Queue a sentence behind the ones already speaking. */
-  function speak(text) {
+  /**
+   * Queue a sentence behind the ones already speaking.
+   *
+   * The turn is checked again when the queue reaches this sentence, not
+   * only when it joins: a sentence can wait behind several others, and
+   * by the time its turn to be spoken arrives the conversation may have
+   * moved on to a newer one.
+   */
+  function speak(text, turn) {
     if (!text.trim()) return;
-    session.spoken = session.spoken.then(() => (session ? Speaker.say(text) : undefined));
+    session.spoken = session.spoken.then(() => {
+      if (!session || session.turn !== turn) return undefined;
+      return Speaker.say(text);
+    });
   }
 
   function setState(state) {

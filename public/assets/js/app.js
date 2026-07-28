@@ -858,7 +858,13 @@ const Practice = (() => {
   function voiceHandlers() {
     return {
       state(state) {
-        setOrb(state, LABELS[state], null);
+        // The caption belongs to whoever is talking, and a state change
+        // is exactly the moment it changes hands. Clearing it here is
+        // what stops the candidate's transcript sitting under Claude's
+        // reply: `heard` and `said` each write a whole caption, so the
+        // only way they stack is if the last turn's text is still there
+        // when the next one starts writing.
+        setOrb(state, LABELS[state], "");
       },
       heard(text) {
         setOrb(null, null, text);
