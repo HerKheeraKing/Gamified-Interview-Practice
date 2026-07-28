@@ -521,8 +521,12 @@ const Voice = (() => {
       mic: false,
       // Which turn is currently the live one. See respondTo.
       turn: 0,
-      // What Claude has actually said out loud this turn. See speak().
+      // What Claude has said out loud this turn: `caption` counts whole
+      // finished sentences and is what the next one builds onto, `aloud`
+      // includes the sentence in progress and is what the candidate has
+      // actually heard. See speak().
       caption: "",
+      aloud: "",
     };
   }
 
@@ -602,6 +606,46 @@ const Voice = (() => {
    */
   function busy() {
     return Boolean(session) && (session.state === "thinking" || session.state === "speaking");
+  }
+
+  /**
+   * Cut the reply short and hand the floor back. False when there was
+   * nothing to cut.
+   *
+   * This is the deliberate override, and the only one. The microphone
+   * rule doesn't move: it is still shut for the whole of the reply, so
+   * no cough, no background voice and no second speaker can end a turn.
+   * It takes a press.
+   *
+   * Cancelling is the turn number's job and needs nothing else.
+   * Retiring it orphans the stream still arriving from Coach, the
+   * sentences queued behind the one playing, and every callback either
+   * of them would have fired — they all find the number moved on and
+   * return. `endTurn` silences what is playing right now. There is no
+   * flag to unset afterwards and nothing in flight that can land late,
+   * which is exactly why the number exists.
+   *
+   * What Claude actually said aloud goes into the history, not the full
+   * reply that arrived. The candidate is answering what they heard, and
+   * the transcript should be a record of the conversation they were in.
+   */
+  function interrupt() {
+    if (!session || !busy()) return false;
+
+    const heard = session.aloud.trim();
+    session.turn++;
+    endTurn();
+
+    if (heard) {
+      session.messages.push({ role: "assistant", content: heard });
+    }
+
+    if (session.mic) {
+      listen();
+    } else {
+      setState("idle");
+    }
+    return true;
   }
 
   /* ---- microphone ---- */
@@ -720,6 +764,7 @@ const Voice = (() => {
     const live = () => Boolean(session) && session.turn === turn;
 
     session.caption = "";
+    session.aloud = "";
     setState("thinking");
     session.messages.push({ role: "user", content: said });
 
@@ -749,7 +794,14 @@ const Voice = (() => {
         if (!live()) return;
         speak(pending, turn);
         pending = "";
-        session.messages.push({ role: "assistant", content: reply });
+        // Note where the reply is *not* recorded: here. The stream ends
+        // long before the voice does, and a turn stopped in between has
+        // to go into the history as the part that was actually heard —
+        // which means nothing may be written until the speaking is
+        // over and it's known which of the two happened. Recording it
+        // on `done` logged the whole reply and then let `interrupt` log
+        // the heard part underneath it.
+        //
         // The microphone is closed for the whole of the reply and opens
         // again here, one tick after the last sentence finishes playing
         // — `spoken` is the queue of utterances, so it settles when the
@@ -763,7 +815,12 @@ const Voice = (() => {
         // nobody asked for.
         session.spoken.then(() => {
           if (!live() || session.state !== "speaking") return;
-          session.on.said(session.caption);
+          // Every sentence was spoken, so the reply as written is the
+          // reply as heard — recorded from `reply` rather than the
+          // caption, which loses the original spacing at the sentence
+          // joins it was split on.
+          session.messages.push({ role: "assistant", content: reply });
+          session.on.said(session.aloud);
           if (session.mic) {
             listen();
           } else {
@@ -827,11 +884,13 @@ const Voice = (() => {
       return Speaker.say(text, {
         spoken(prefix) {
           if (!session || session.turn !== turn) return;
-          session.on.said(joined(before, prefix), { partial: true });
+          session.aloud = joined(before, prefix);
+          session.on.said(session.aloud, { partial: true });
         },
       }).then(() => {
         if (!session || session.turn !== turn) return;
         session.caption = joined(before, text);
+        session.aloud = session.caption;
       });
     });
   }
@@ -846,7 +905,10 @@ const Voice = (() => {
     session.on.state(state);
   }
 
-  return { supported, attached, attach, openMic, closeMic, stop, submit, listening, busy };
+  return {
+    supported, attached, attach, openMic, closeMic, stop, submit,
+    listening, busy, interrupt,
+  };
 })();
 
 /* ---------------------------------------------------------- */

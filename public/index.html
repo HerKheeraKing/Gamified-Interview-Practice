@@ -203,7 +203,17 @@
               </div>
               <p class="orb-state" id="orb-state" data-state="idle">Mic closed</p>
               <p class="orb-caption" id="orb-caption"></p>
-              <button type="button" class="ghost-btn" id="voice-toggle">Open the mic</button>
+              <!-- Stop is a manual override, not an interruption: the
+                   microphone stays shut while Claude talks, so cutting
+                   the reply short is a deliberate press rather than
+                   something a cough can do. It exists only while there
+                   is speech to stop. -->
+              <div class="voice-actions">
+                <button type="button" class="ghost-btn" id="voice-toggle">Open the mic</button>
+                <button type="button" class="stop-btn" id="voice-stop" hidden>
+                  Stop
+                </button>
+              </div>
             </div>
 
             <!-- Live preview of the message being composed. In normal

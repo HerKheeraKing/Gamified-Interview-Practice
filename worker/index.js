@@ -459,10 +459,36 @@ const Coach = (() => {
    * treating the endpoint as a free chatbot.
    */
   function trim(messages) {
-    return messages
+    const clean = messages
       .filter((m) => m && (m.role === "user" || m.role === "assistant") && m.content)
       .slice(-MAX_TURNS)
       .map((m) => ({ role: m.role, content: String(m.content).slice(0, MAX_CHARS) }));
+
+    return fold(clean);
+  }
+
+  /**
+   * Merge neighbours that share a role.
+   *
+   * Anthropic requires the roles to alternate and rejects the whole
+   * request when they don't. A client can produce two in a row honestly
+   * — stopping a reply before a single word was spoken leaves a turn
+   * with nothing to record for the interviewer — and losing the request
+   * over it would turn a stop into an error. Folding keeps every word
+   * the candidate said and costs nothing when the roles already
+   * alternate, which is the normal case.
+   */
+  function fold(messages) {
+    const folded = [];
+    for (const message of messages) {
+      const last = folded[folded.length - 1];
+      if (last && last.role === message.role) {
+        last.content = `${last.content}\n\n${message.content}`.slice(0, MAX_CHARS);
+      } else {
+        folded.push(message);
+      }
+    }
+    return folded;
   }
 
   return { converse };

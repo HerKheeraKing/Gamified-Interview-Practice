@@ -1912,8 +1912,75 @@ main {
   mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
 }
 
-#voice-toggle {
+/* The two voice controls share a row so that Stop appearing and
+   disappearing mid-reply doesn't shunt the panel up and down. The row
+   carries the spacing that used to sit on the toggle itself. */
+.voice-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   margin-top: 18px;
+}
+
+/* Stop — the .primary-btn recipe in red.
+   Same glass and glow as every other filled button on the site (blurred
+   translucent fill, lit rim, outer bloom, inner highlight); only the hue
+   moves, from cyan to the palette's existing --danger pink-red. Kept a
+   shade softer than a true red: this ends a sentence, it doesn't delete
+   anything, and the panel it sits on is dark plum where saturated red
+   reads as an error rather than a control. */
+.stop-btn {
+  background:
+    linear-gradient(90deg, rgba(242,120,154,0.30), rgba(255,160,185,0.40));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 190, 210, 0.55);
+  color: #fff0f4;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  padding: 10px 22px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow:
+    0 0 18px rgba(242, 120, 154, 0.45),
+    inset 0 0 12px rgba(255, 255, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  text-shadow: 0 0 10px rgba(255, 190, 210, 0.55);
+  animation: stop-pulse 1.8s ease-in-out infinite;
+}
+
+.stop-btn[hidden] { display: none; }
+
+.stop-btn:hover {
+  background:
+    linear-gradient(90deg, rgba(242,120,154,0.45), rgba(255,160,185,0.55));
+  transform: translateY(-1px);
+}
+
+/* The glow breathes while Claude is talking, at the same unhurried pace
+   as the recording indicator, so the button reads as live rather than
+   as a warning sitting there. */
+@keyframes stop-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 14px rgba(242, 120, 154, 0.35),
+      inset 0 0 12px rgba(255, 255, 255, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+  50% {
+    box-shadow:
+      0 0 26px rgba(242, 120, 154, 0.7),
+      inset 0 0 16px rgba(255, 255, 255, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stop-btn { animation: none; }
 }
 
 /* ---------------- Send to Claude ---------------- */

@@ -523,6 +523,7 @@ const Practice = (() => {
     // Plugging in AirPods mid-session should show up without a reload.
     Microphones.onChange(() => listMics());
     document.getElementById("voice-toggle").addEventListener("click", toggleVoice);
+    document.getElementById("voice-stop").addEventListener("click", () => Voice.interrupt());
     document.getElementById("handoff-copy").addEventListener("click", copyPrompt);
   }
 
@@ -794,7 +795,7 @@ const Practice = (() => {
       // the rule for the text box too — otherwise the one thing you
       // can't do by talking is the one thing you can do by typing.
       if (Voice.busy()) {
-        note("Let the interviewer finish — you're up again the moment they stop.");
+        note("Let the interviewer finish, or press Stop to take the floor.");
         return;
       }
       if (Voice.submit(said)) {
@@ -931,6 +932,11 @@ const Practice = (() => {
       // up the state through descendant CSS — it needs its own copy to
       // recolour itself when Claude starts speaking.
       document.getElementById("orb-state").dataset.state = state;
+      // Stop exists only while there is speech to stop. Driving it from
+      // the state means it can't outlive the reply: whatever ends the
+      // turn — finishing, being stopped, the mic closing — arrives here
+      // as a state change and takes the button with it.
+      document.getElementById("voice-stop").hidden = state !== "speaking";
     }
     if (label !== null && label !== undefined) {
       document.getElementById("orb-state").textContent = label;
