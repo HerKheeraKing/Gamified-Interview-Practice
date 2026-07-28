@@ -389,6 +389,66 @@
         <button id="login-cancel" class="pill-btn">CANCEL</button>
         <button id="login-submit" class="pill-btn pill-btn-primary">CONTINUE</button>
       </div>
+
+      <!-- MINTING PANEL — an alternate expanded state of this same modal,
+           not a second page. It sits below the sign-in actions and behind
+           a toggle because it is for exactly one person: whoever holds
+           ADMIN_TOKEN. Everyone else opens this modal, types a codename,
+           and never learns the panel is here.
+
+           Deliberately outside the sign-in flow. Minting a code needs no
+           account and grants none, so it shares the modal but shares no
+           fields with it — nothing typed here can affect who signs in,
+           and nothing typed above affects what gets minted. -->
+      <div class="admin-block">
+        <button type="button" class="link-btn" id="admin-toggle" aria-expanded="false">
+          Generate beta code
+        </button>
+
+        <div class="admin-panel" id="admin-panel" hidden>
+          <input
+            id="admin-token"
+            class="login-input admin-input"
+            type="password"
+            maxlength="200"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="ADMIN TOKEN"
+          />
+
+          <label class="admin-cap-row" for="admin-cap">
+            <span class="admin-cap-label">Spend cap</span>
+            <span class="admin-cap-field">
+              <span class="admin-cap-currency">$</span>
+              <input
+                id="admin-cap"
+                class="admin-cap-input"
+                type="number"
+                min="0.05"
+                max="100"
+                step="0.05"
+                value="0.50"
+              />
+            </span>
+          </label>
+
+          <button type="button" class="pill-btn pill-btn-primary admin-generate" id="admin-generate">
+            GENERATE
+          </button>
+
+          <p class="login-error" id="admin-error"></p>
+
+          <!-- The code is shown, not just copied. A clipboard write that
+               silently failed would look identical to one that worked,
+               and this string cannot be regenerated — it is already a
+               row in D1 by the time it appears here. -->
+          <div class="admin-result" id="admin-result" hidden>
+            <p class="admin-result-label" id="admin-result-label"></p>
+            <code class="admin-code" id="admin-code"></code>
+            <button type="button" class="ghost-btn admin-copy" id="admin-copy">Copy</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

@@ -224,9 +224,22 @@ Locally the same three values go in `.dev.vars` (gitignored) alongside
 
 ### Managing invite codes
 
-Three routes, guarded by `ADMIN_TOKEN` in an `x-admin-token` header.
-They answer **404, not 401**, when that secret is unset — an admin route
-that announces itself on an unconfigured deployment is an invitation.
+Day to day, from the site itself: open the login modal and click
+**Generate beta code**. That reveals an alternate expanded state of the
+same modal — an admin token field, a spend cap, and a Generate button —
+and shows the minted code in place. It shares no field, no error line
+and no submit path with signing in, so nothing typed in one half can
+affect the other, and the panel resets itself every time the modal is
+opened or closed. The admin token is passed straight to the request and
+never stored: not in `localStorage`, not in a module variable.
+
+A wrong token shows a clear error and creates nothing. The Worker
+answers 404 rather than 401 for a bad token — an admin route that says
+"wrong password" has confirmed it exists — so `Api.mintCode` translates
+that one 404 into a sentence, since it is the one caller that was
+definitely aiming at the route.
+
+For scripting, the same three routes take an `x-admin-token` header.
 
 ```bash
 BASE=https://kheeras-case-method.workers.dev

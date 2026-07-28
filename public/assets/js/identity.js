@@ -182,8 +182,41 @@ const Api = (() => {
     }
   }
 
-  async function send(path, method, body) {
-    const headers = { "content-type": "application/json" };
+  /**
+   * Mint an invite code. Resolves to { code, cap_usd, ... } or throws
+   * with a sentence worth showing.
+   *
+   * `adminToken` is passed in on every call and never stored — not in
+   * Identity, not in localStorage, not in a module variable. It is the
+   * one credential here that grants the ability to spend money on
+   * someone else's behalf, and the cost of keeping it is a retype.
+   *
+   * The 404 translation matters. The Worker answers 404 rather than 401
+   * for a bad or missing admin token, on purpose: an admin route that
+   * says "wrong password" has confirmed it exists. That is right for the
+   * wire and useless on screen, so the one caller who was definitely
+   * aiming at the route says what a 404 means for them.
+   */
+  async function mintCode(adminToken, capUsd) {
+    const label = `minted ${new Date().toISOString().slice(0, 10)}`;
+    try {
+      const res = await send(
+        "/api/admin/codes",
+        "POST",
+        { cap_usd: capUsd, label },
+        { "x-admin-token": adminToken }
+      );
+      return res.code;
+    } catch (err) {
+      if (err.status === 404) {
+        throw new Error("That admin token wasn't accepted. No code was created.");
+      }
+      throw err;
+    }
+  }
+
+  async function send(path, method, body, extraHeaders) {
+    const headers = { "content-type": "application/json", ...extraHeaders };
     const token = Identity.token();
     if (token) {
       headers.authorization = `Bearer ${token}`;
@@ -204,5 +237,5 @@ const Api = (() => {
     return data;
   }
 
-  return { signIn, refreshAccess, pullLog, pushLog, clearLog };
+  return { signIn, refreshAccess, mintCode, pullLog, pushLog, clearLog };
 })();

@@ -221,6 +221,24 @@ async function main() {
   check("cap is recorded", minted.json.code.cap_usd, 0.05);
   check("code is readable", /^CASE(-[A-Z2-9]{4}){3}$/.test(minted.json.code.code), true);
 
+  // The login modal's minting panel refuses a wrong token client-side
+  // too, but the claim that matters is this one: a rejected mint leaves
+  // no row behind. A panel that showed an error while quietly creating a
+  // code would be worse than one that failed outright.
+  const before = (await call("/api/admin/codes", { admin: ADMIN_TOKEN })).json.codes.length;
+  const refused = await call("/api/admin/codes", { method: "POST", admin: "wrong", body: { cap_usd: 5 } });
+  const after = (await call("/api/admin/codes", { admin: ADMIN_TOKEN })).json.codes.length;
+  check("a bad token can't mint", refused.status, 404);
+  check("and creates nothing", after, before);
+
+  // The panel sends a number it has already range-checked; the Worker
+  // clamps regardless, because the panel is not the only possible caller.
+  const absurd = await call("/api/admin/codes", { method: "POST", admin: ADMIN_TOKEN, body: { cap_usd: 500 } });
+  check("an absurd cap is clamped, not honoured", absurd.json.code.cap_usd, 100);
+
+  const defaulted = await call("/api/admin/codes", { method: "POST", admin: ADMIN_TOKEN, body: {} });
+  check("a missing cap defaults to $0.50", defaulted.json.code.cap_usd, 0.5);
+
   const code = minted.json.code.code;
 
   console.log("\nINVITED");

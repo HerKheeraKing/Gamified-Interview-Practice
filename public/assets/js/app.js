@@ -9,7 +9,10 @@
  *   3. Render layer     - DOM writes only, reads state, no calculations
  *   4. Score modal      - the scorecard, and the only owner of the dots
  *   5. Practice modes   - the middle of that modal: text, voice, handoff
- *   6+ Event wiring     - glues user actions to state + render
+ *   6. Views            - nav between the top-level screens
+ *   7. Login            - the codename modal and the nav badge
+ *   8. Minting          - that same modal's other state: invite codes
+ *   9. Bootstrap        - glues user actions to state + render
  *
  * Kept intentionally framework-free and single-file per concern
  * so the whole thing stays readable without a build step.
@@ -1328,6 +1331,13 @@ const Views = (() => {
  * Signing in is never forced. `init()` only ever changes the label on a
  * single nav button; if the detective ignores it forever the site keeps
  * working from localStorage alone.
+ *
+ * The modal has two states, not two purposes. Collapsed it signs a
+ * detective in; expanded it also mints invite codes for whoever holds
+ * ADMIN_TOKEN. They share a box and nothing else — no field, no
+ * submit path, no error line — because a mistyped admin token must not
+ * be able to change who signs in, and vice versa. `Minting` below owns
+ * the expanded half entirely.
  */
 const Login = (() => {
   function init() {
@@ -1344,6 +1354,7 @@ const Login = (() => {
       if (e.target.id === "login-modal-backdrop") close();
     });
 
+    Minting.init();
     renderBadge();
   }
 
@@ -1364,12 +1375,18 @@ const Login = (() => {
     const input = document.getElementById("login-input");
     input.value = "";
     document.getElementById("login-code").value = "";
+    // Reopening always lands on the sign-in state. The minting panel is
+    // rare enough that leaving it hanging open from last time would be a
+    // surprise, and it holds an admin token that shouldn't outlive the
+    // moment it was needed.
+    Minting.collapse();
     document.getElementById("login-modal-backdrop").classList.add("open");
     input.focus();
   }
 
   function close() {
     document.getElementById("login-modal-backdrop").classList.remove("open");
+    Minting.collapse();
   }
 
   async function submit() {
@@ -1436,7 +1453,146 @@ const Login = (() => {
 })();
 
 /* ---------------------------------------------------------- */
-/* 8. BOOTSTRAP                                                 */
+/* 8. MINTING                                                   */
+/* ---------------------------------------------------------- */
+
+/**
+ * The login modal's other state: making invite codes.
+ *
+ * Behind a toggle rather than always visible, because it is for one
+ * person and everyone else opening this modal wants the codename field.
+ * In the same modal rather than an /admin page, because a second page
+ * would be a second thing to route, style, and remember exists — for a
+ * form with two fields that gets used a handful of times.
+ *
+ * It shares no state with signing in. Not the fields, not the error
+ * line, not the submit path. That separation is the whole reason this
+ * can live inside the login modal without making signing in riskier:
+ * there is no sequence of keystrokes here that changes who logs in.
+ *
+ * The admin token is never stored. It lives in the input, is passed
+ * straight to the request, and is wiped when the panel closes. Holding
+ * it in a module variable "for convenience" would mean the one
+ * credential that can spend money outlives the thirty seconds it was
+ * needed for.
+ */
+const Minting = (() => {
+  function init() {
+    document.getElementById("admin-toggle").addEventListener("click", toggle);
+    document.getElementById("admin-generate").addEventListener("click", generate);
+    document.getElementById("admin-copy").addEventListener("click", copy);
+
+    // Enter inside the panel mints; it must never fall through to the
+    // sign-in button sitting a few pixels above it.
+    ["admin-token", "admin-cap"].forEach((id) => {
+      document.getElementById(id).addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        e.stopPropagation();
+        generate();
+      });
+    });
+  }
+
+  function toggle() {
+    const panel = document.getElementById("admin-panel");
+    if (panel.hidden) {
+      expand();
+    } else {
+      collapse();
+    }
+  }
+
+  function expand() {
+    document.getElementById("admin-panel").hidden = false;
+    document.getElementById("admin-toggle").setAttribute("aria-expanded", "true");
+    document.getElementById("admin-toggle").textContent = "Hide beta code panel";
+    document.getElementById("admin-token").focus();
+  }
+
+  /**
+   * Shut the panel and forget everything in it.
+   *
+   * Called on close and on reopen as well as on the toggle, so there is
+   * no path that leaves an admin token sitting in a field behind a
+   * dismissed modal. Clearing the result too: a code that has already
+   * been written down is clutter, and one that hasn't is a row in D1
+   * either way — showing it again later would suggest otherwise.
+   */
+  function collapse() {
+    document.getElementById("admin-panel").hidden = true;
+    document.getElementById("admin-toggle").setAttribute("aria-expanded", "false");
+    document.getElementById("admin-toggle").textContent = "Generate beta code";
+    document.getElementById("admin-token").value = "";
+    document.getElementById("admin-result").hidden = true;
+    setError("");
+  }
+
+  async function generate() {
+    const button = document.getElementById("admin-generate");
+    const token = document.getElementById("admin-token").value.trim();
+    const cap = Number(document.getElementById("admin-cap").value);
+
+    if (!token) {
+      setError("The admin token is the whole check — nothing is minted without it.");
+      return;
+    }
+
+    // Checked here as well as in the Worker, which clamps it. The Worker
+    // is the one that counts; this is so a typed "5oo" is a sentence on
+    // screen rather than a code silently minted at the default cap.
+    if (!Number.isFinite(cap) || cap <= 0 || cap > 100) {
+      setError("Give the cap a dollar amount between 0.05 and 100.");
+      return;
+    }
+
+    setError("");
+    button.disabled = true;
+    button.textContent = "MINTING…";
+
+    try {
+      const minted = await Api.mintCode(token, cap);
+      show(minted);
+    } catch (err) {
+      document.getElementById("admin-result").hidden = true;
+      setError(err.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = "GENERATE";
+    }
+  }
+
+  function show(minted) {
+    document.getElementById("admin-code").textContent = minted.code;
+    document.getElementById("admin-result-label").textContent =
+      `New code — $${Number(minted.cap_usd).toFixed(2)} of AI coaching, shared by everyone who uses it.`;
+    document.getElementById("admin-result").hidden = false;
+    document.getElementById("admin-copy").textContent = "Copy";
+  }
+
+  /**
+   * Convenience only. The code is on screen and selectable, so a browser
+   * that blocks the clipboard costs a manual select rather than the code.
+   */
+  async function copy() {
+    const button = document.getElementById("admin-copy");
+    try {
+      await navigator.clipboard.writeText(document.getElementById("admin-code").textContent);
+      button.textContent = "Copied";
+    } catch (err) {
+      button.textContent = "Select it manually";
+    }
+  }
+
+  function setError(message) {
+    document.getElementById("admin-error").textContent = message;
+  }
+
+  return { init, collapse };
+})();
+
+/* ---------------------------------------------------------- */
+/* 9. BOOTSTRAP                                                 */
 /* ---------------------------------------------------------- */
 
 function bootstrap() {
