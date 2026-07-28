@@ -790,6 +790,13 @@ const Practice = (() => {
     // declines when there's no conversation to add to — an unsupported
     // browser — and that has to be said rather than swallowed.
     if (mode === "voice") {
+      // Waiting out the reply is the rule for the microphone, so it is
+      // the rule for the text box too — otherwise the one thing you
+      // can't do by talking is the one thing you can do by typing.
+      if (Voice.busy()) {
+        note("Let the interviewer finish — you're up again the moment they stop.");
+        return;
+      }
       if (Voice.submit(said)) {
         input.value = "";
         refreshComposer();

@@ -214,8 +214,28 @@ const Speaker = (() => {
     return Boolean(engine);
   }
 
-  function say(text) {
+  /**
+   * Speak `text`, resolving when it has finished being spoken.
+   *
+   * @param on  { spoken(prefix) } — the part of `text` already out loud,
+   *            reported as each word starts. Optional: callers that only
+   *            want sound can ignore it entirely.
+   *
+   * The prefix comes from the engine's own boundary events, so it tracks
+   * the voice rather than a guess at how fast the voice might be going.
+   * Rate changes, a long word, a slow device — the caption follows all
+   * of them for free, because it is reading the same clock the sound is.
+   *
+   * Not every engine emits boundaries (several mobile ones don't). When
+   * none arrive the sentence simply reveals whole at `onend`, which is
+   * still in step with the speech — just at sentence granularity instead
+   * of word. No caller needs to know which kind of engine it got.
+   */
+  function say(text, on) {
+    const handlers = { spoken() {}, ...on };
+
     if (!engine || !text.trim()) {
+      handlers.spoken(text);
       return Promise.resolve();
     }
 
@@ -224,10 +244,26 @@ const Speaker = (() => {
       utterance.voice = preferredVoice();
       utterance.rate = 1.02;
       utterance.pitch = 1.0;
-      utterance.onend = resolve;
+
+      utterance.onboundary = (event) => {
+        // Sentence boundaries repeat ground the word events already
+        // cover, and would rewind the caption when they do.
+        if (event.name && event.name !== "word") return;
+        const length = event.charLength || 0;
+        handlers.spoken(text.slice(0, event.charIndex + length));
+      };
+
+      const finish = () => {
+        // Whatever the boundaries did or didn't say, the sentence is
+        // fully spoken now, so the caption ends up whole either way.
+        handlers.spoken(text);
+        resolve();
+      };
+
+      utterance.onend = finish;
       // A failed utterance must still resolve, or the caller's queue
       // stalls forever waiting on a voice that never spoke.
-      utterance.onerror = resolve;
+      utterance.onerror = finish;
       engine.speak(utterance);
     });
   }
@@ -485,6 +521,8 @@ const Voice = (() => {
       mic: false,
       // Which turn is currently the live one. See respondTo.
       turn: 0,
+      // What Claude has actually said out loud this turn. See speak().
+      caption: "",
     };
   }
 
@@ -521,11 +559,13 @@ const Voice = (() => {
 
   /**
    * Take a typed turn. Same conversation, same spoken reply — the text
-   * box is a quieter way to talk, not a way out of the voice flow.
-   * False when there's no conversation to add it to.
+   * box is a quieter way to talk, not a way out of the voice flow, and
+   * in particular not a way to cut the interviewer off that the
+   * microphone doesn't have. False when there's no conversation to add
+   * it to, or when Claude is still using the one there is.
    */
   function submit(text) {
-    if (!session || !text.trim()) return false;
+    if (!session || !text.trim() || busy()) return false;
     session.on.heard(text);
     respondTo(text);
     return true;
@@ -549,6 +589,19 @@ const Voice = (() => {
 
   function listening() {
     return Boolean(session) && session.state === "listening";
+  }
+
+  /**
+   * True while Claude has the floor.
+   *
+   * The microphone enforces this on its own — it is closed from the
+   * moment a turn starts until the last sentence has been spoken, so
+   * there is no way to talk over the interviewer. The text box is the
+   * one way in that isn't the microphone, and callers ask this before
+   * offering it, so a typed line can't do what a spoken one can't.
+   */
+  function busy() {
+    return Boolean(session) && (session.state === "thinking" || session.state === "speaking");
   }
 
   /* ---- microphone ---- */
@@ -666,6 +719,7 @@ const Voice = (() => {
     const turn = ++session.turn;
     const live = () => Boolean(session) && session.turn === turn;
 
+    session.caption = "";
     setState("thinking");
     session.messages.push({ role: "user", content: said });
 
@@ -681,8 +735,10 @@ const Voice = (() => {
           setState("speaking");
         }
         reply += chunk;
+        // Note what does *not* happen here: the caption is not written
+        // from `reply`. See speak() — the words appear at the pace they
+        // are spoken, not the pace they arrive.
         pending = absorb(pending + chunk, turn);
-        session.on.said(reply, { partial: true });
       },
 
       grades(grades) {
@@ -694,13 +750,20 @@ const Voice = (() => {
         speak(pending, turn);
         pending = "";
         session.messages.push({ role: "assistant", content: reply });
-        session.on.said(reply);
-        // Listening resumes only once the last sentence is out, so the
-        // microphone never hears the interviewer. A typed turn with the
-        // mic closed still gets spoken — it just falls back to idle
-        // afterwards instead of opening a microphone nobody asked for.
+        // The microphone is closed for the whole of the reply and opens
+        // again here, one tick after the last sentence finishes playing
+        // — `spoken` is the queue of utterances, so it settles when the
+        // voice stops, not when the text stopped arriving. That is the
+        // only path back to listening: nothing the candidate does while
+        // Claude is talking can reopen the mic early, and leaving it
+        // open would transcribe the interviewer as if it were them.
+        //
+        // A typed turn with the mic closed still gets spoken — it just
+        // falls back to idle afterwards instead of opening a microphone
+        // nobody asked for.
         session.spoken.then(() => {
           if (!live() || session.state !== "speaking") return;
+          session.on.said(session.caption);
           if (session.mic) {
             listen();
           } else {
@@ -733,7 +796,18 @@ const Voice = (() => {
   }
 
   /**
-   * Queue a sentence behind the ones already speaking.
+   * Queue a sentence behind the ones already speaking, and caption it as
+   * it is spoken.
+   *
+   * The caption is built from what has actually left the speaker, never
+   * from what has arrived from Coach. Those run at wildly different
+   * speeds: the stream lands a whole reply in a second or two, while the
+   * voice takes twenty to read it. Captioning the stream dumped the
+   * finished paragraph on screen and left the voice reading text the
+   * candidate had already finished — and, past six lines, reading text
+   * that had already scrolled out of the cap. Captioning the speech
+   * keeps the words and the sound on the same clock, which is what the
+   * live transcript on the candidate's own side already does.
    *
    * The turn is checked again when the queue reaches this sentence, not
    * only when it joins: a sentence can wait behind several others, and
@@ -742,10 +816,28 @@ const Voice = (() => {
    */
   function speak(text, turn) {
     if (!text.trim()) return;
+
     session.spoken = session.spoken.then(() => {
       if (!session || session.turn !== turn) return undefined;
-      return Speaker.say(text);
+
+      // Sentences before this one are already captioned and stay put;
+      // this one grows onto the end of them.
+      const before = session.caption;
+
+      return Speaker.say(text, {
+        spoken(prefix) {
+          if (!session || session.turn !== turn) return;
+          session.on.said(joined(before, prefix), { partial: true });
+        },
+      }).then(() => {
+        if (!session || session.turn !== turn) return;
+        session.caption = joined(before, text);
+      });
     });
+  }
+
+  function joined(before, part) {
+    return before ? `${before} ${part}` : part;
   }
 
   function setState(state) {
@@ -754,7 +846,7 @@ const Voice = (() => {
     session.on.state(state);
   }
 
-  return { supported, attached, attach, openMic, closeMic, stop, submit, listening };
+  return { supported, attached, attach, openMic, closeMic, stop, submit, listening, busy };
 })();
 
 /* ---------------------------------------------------------- */
