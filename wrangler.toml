@@ -2,6 +2,24 @@ name = "kheeras-case-method"
 main = "worker/index.js"
 compatibility_date = "2026-07-27"
 
+# Worker logs, so `wrangler tail` has something to receive.
+#
+# Off by default, and silently: console.log in the Worker runs, reaches
+# nobody, and nothing anywhere says the logs were dropped rather than
+# never written. That matters here because /api/coach reports whether the
+# prompt cache engaged, and a cache that quietly stopped working looks
+# exactly like a cache that was never checked on.
+#
+# invocation_logs adds one line per request — the method, path, status and
+# duration — which is what makes a missing log distinguishable from a
+# request that never arrived.
+#
+# This is deploy-time configuration: it takes effect on the next deploy,
+# not on merge.
+[observability.logs]
+enabled = true
+invocation_logs = true
+
 # public/ holds the served site and nothing else.
 #
 # This must NOT point at the repo root. `wrangler dev` watches the assets
