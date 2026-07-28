@@ -1213,10 +1213,42 @@ main {
     0 4px 18px rgba(0, 0, 0, 0.22);
 }
 
+/* The "sign in first" / "no speech engine" notice, in both AI modes.
+   The panel's own glass recipe with the accent swapped cyan -> coral:
+   it belongs to the same family of surfaces, and the warm glow is what
+   marks it as something to deal with. Not styled as an error — nothing
+   has gone wrong, the detective just hasn't done a thing yet.
+
+   fit-content keeps it snug around the message rather than spanning the
+   panel, which would read as a banner and pull more weight than a
+   one-line prompt deserves. The max-width caps it before the text gets
+   long enough to look like a paragraph. */
 .practice-note {
-  margin: 0 0 16px;
+  width: fit-content;
+  max-width: 42ch;
+  margin: 0 auto 20px;
+  padding: 10px 16px;
+  border: 1px solid rgba(242, 120, 154, 0.30);
+  border-radius: 12px;
+
+  /* Same measured discipline as .practice-panel: this sits *on* the
+     panel, so it's mixed a step lighter again — +5 luminance, which
+     separates the two without starting a brightness arms race. */
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.026) 0%, rgba(255,255,255,0.012) 45%, rgba(242,120,154,0.05) 100%),
+    rgba(60, 40, 56, 0.16);
+
+  /* Tighter and dimmer than the panel's 26px/0.14 bloom — a card inside
+     a card must not out-glow the one holding it. */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    inset 0 -12px 24px rgba(242, 120, 154, 0.05),
+    0 0 20px rgba(242, 120, 154, 0.13),
+    0 3px 14px rgba(0, 0, 0, 0.20);
+
+  text-align: center;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--danger);
 }
 
