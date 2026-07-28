@@ -79,7 +79,7 @@ body::-webkit-scrollbar,
 .preview-body::-webkit-scrollbar,
 .orb-caption::-webkit-scrollbar,
 .mic-list::-webkit-scrollbar {
-  width: 10px;
+  width: 8px;
 }
 
 html::-webkit-scrollbar-thumb,
