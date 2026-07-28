@@ -43,20 +43,32 @@
    .practice-input, which hides its bar entirely; it's absent
    here and says why at its own definition.
 
-   scrollbar-color is for Firefox, which ignores ::-webkit-*
-   pseudo-elements. It can't do the glow, but it can at least
-   get the palette rather than falling back to grey.
+   THE @supports GUARD IS LOAD-BEARING. Since Chrome 121 the
+   standard scrollbar-width / scrollbar-color properties are
+   supported, and setting either to anything but `auto` makes
+   Chromium switch to standard rendering and ignore every
+   ::-webkit-scrollbar rule on that element. Declaring both in
+   the same block as the pseudo-elements therefore turns the
+   glow off in the browser this site is actually used in — the
+   bars go flat and solid, which is exactly what happened.
+
+   So the standard properties are quarantined behind a query
+   that only Firefox passes. It can't render the glow anyway;
+   this gets it the palette instead of a grey default, without
+   the declaration reaching Chromium at all.
    ============================================================ */
 
-html, body,
-.log-table-scroll,
-.modal-scroll,
-.chat-log,
-.preview-body,
-.orb-caption,
-.mic-list {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(200, 245, 255, 0.4) rgba(255, 255, 255, 0.04);
+@supports not selector(::-webkit-scrollbar) {
+  html, body,
+  .log-table-scroll,
+  .modal-scroll,
+  .chat-log,
+  .preview-body,
+  .orb-caption,
+  .mic-list {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(200, 245, 255, 0.4) rgba(255, 255, 255, 0.04);
+  }
 }
 
 html::-webkit-scrollbar,
@@ -1619,6 +1631,10 @@ main {
   scrollbar-width: none;
 }
 
+/* Safe to sit beside scrollbar-width above, unlike the shared recipe:
+   in Chromium the standard property wins and this rule is dead, but
+   both say "no bar", so the outcome is the same either way. It stays
+   for browsers that only understand this half. */
 .practice-input::-webkit-scrollbar { display: none; }
 
 /* Collapsed out of the way while the preview card carries the message,
