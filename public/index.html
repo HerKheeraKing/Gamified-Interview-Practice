@@ -212,30 +212,12 @@
                  against it and cover the orb or the chat log. -->
             <div class="composer-preview" id="composer-preview" hidden>
               <div class="preview-head">
-                <span class="preview-label">Your answer</span>
+                <span class="preview-label" id="preview-label">Your answer</span>
                 <span class="preview-count" id="preview-count"></span>
-                <button
-                  type="button"
-                  class="preview-expand"
-                  id="preview-expand"
-                  aria-label="Expand your answer"
-                  aria-expanded="false"
-                  title="Expand to read it all"
-                >
-                  <svg class="icon-open" viewBox="0 0 24 24" width="14" height="14" fill="none"
-                       stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                       stroke-linejoin="round" aria-hidden="true">
-                    <path d="M8 3H3v5" /><path d="M21 8V3h-5" />
-                    <path d="M3 16v5h5" /><path d="M16 21h5v-5" />
-                  </svg>
-                  <svg class="icon-shut" viewBox="0 0 24 24" width="14" height="14" fill="none"
-                       stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                       stroke-linejoin="round" aria-hidden="true">
-                    <path d="M3 8h5V3" /><path d="M16 3v5h5" />
-                    <path d="M21 16h-5v5" /><path d="M8 21v-5H3" />
-                  </svg>
-                </button>
               </div>
+              <!-- Clicking the text hands editing back: the box below is
+                   collapsed while this card is up, so this is the way
+                   back to a caret. -->
               <p class="preview-body" id="preview-body"></p>
             </div>
 
@@ -268,6 +250,31 @@
                   <rect x="9" y="2.5" width="6" height="11" rx="3" />
                   <path d="M5.5 11a6.5 6.5 0 0 0 13 0" />
                   <path d="M12 17.5V21" />
+                </svg>
+              </button>
+              <!-- Lives out here, not in the preview card. The card is
+                   hidden whenever the box is showing, so a toggle
+                   inside it would vanish exactly when it's needed. -->
+              <button
+                type="button"
+                class="mic-btn"
+                id="preview-expand"
+                aria-label="Expand your answer"
+                aria-expanded="false"
+                title="Expand to read it all"
+                hidden
+              >
+                <svg class="icon-open" viewBox="0 0 24 24" width="15" height="15" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                     stroke-linejoin="round" aria-hidden="true">
+                  <path d="M8 3H3v5" /><path d="M21 8V3h-5" />
+                  <path d="M3 16v5h5" /><path d="M16 21h5v-5" />
+                </svg>
+                <svg class="icon-shut" viewBox="0 0 24 24" width="15" height="15" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                     stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 8h5V3" /><path d="M16 3v5h5" />
+                  <path d="M21 16h-5v5" /><path d="M8 21v-5H3" />
                 </svg>
               </button>
               <button type="button" class="composer-btn" id="practice-send">Send</button>

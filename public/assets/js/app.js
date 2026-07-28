@@ -503,7 +503,8 @@ const Practice = (() => {
     document.getElementById("practice-send").addEventListener("click", send);
 
     const input = document.getElementById("practice-input");
-    input.addEventListener("input", refreshComposer);
+    input.addEventListener("input", onInput);
+    document.getElementById("preview-body").addEventListener("click", editFromPreview);
     input.addEventListener("keydown", (e) => {
       // Enter sends, as it did when this was a single-line field.
       // Shift+Enter is the escape hatch now that a line break is
@@ -532,6 +533,7 @@ const Practice = (() => {
     document.getElementById("practice-panel").hidden = true;
     document.getElementById("chat-log").innerHTML = "";
     document.getElementById("practice-input").value = "";
+    settleTyping();
     refreshComposer();
     document.getElementById("handoff-status").textContent = "";
     document.querySelectorAll(".practice-mode").forEach((b) => b.classList.remove("active"));
@@ -615,35 +617,98 @@ const Practice = (() => {
     element.hidden = !message;
   }
 
+  /* ---- composer: one message, one surface ---- */
+
   /**
-   * Make the composer reflect what's in it — box height and preview
-   * card, together.
+   * The composer shows the message being written in exactly one place at
+   * a time — never the card and the box together.
    *
-   * One function rather than two because there is no moment when only
-   * half of it should happen, and every caller would otherwise have to
-   * remember both. Called from the `input` event and from everywhere
+   *   capturing   words are arriving, by keyboard or microphone. The
+   *               card carries them, larger, and the box tucks away.
+   *   idle        nothing has arrived for a moment. The box comes back
+   *               with the caret where it was; the card stands down.
+   *   expanded    the detective asked to read it all. Card, full size,
+   *               whichever of the two above is true.
+   *
+   * `capturing` is a fading fact, not an event — it stays true through
+   * the pauses inside a sentence and lapses only after a real stop.
+   * TYPING_PAUSE_MS is long for the same reason the voice threshold is:
+   * someone composing an interview answer stops to think mid-clause, and
+   * swapping the surface under them every time they do would be worse
+   * than the duplication this replaces. Dictation doesn't need a timer —
+   * the microphone already says when it's finished.
+   */
+  const TYPING_PAUSE_MS = 2500;
+  let typingRecent = false;
+  let typingTimer = null;
+
+  function onInput() {
+    typingRecent = true;
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+      typingRecent = false;
+      refreshComposer();
+    }, TYPING_PAUSE_MS);
+    refreshComposer();
+  }
+
+  /** Drop straight to idle — sending, clearing, or asking to edit. */
+  function settleTyping() {
+    clearTimeout(typingTimer);
+    typingRecent = false;
+  }
+
+  /**
+   * Make the composer reflect what's in it — content, which surface is
+   * showing, and the height of the box.
+   *
+   * One function rather than three because there is no moment when only
+   * part of it should happen, and every caller would otherwise have to
+   * remember the set. Called from the `input` event and from everywhere
    * the value is set in code — dictation rewriting the transcript,
    * send() clearing it, reset() emptying it. Programmatic assignment
    * fires no `input` event, so a box filled by the microphone would
-   * otherwise stay three lines tall with a blank card above it.
+   * otherwise sit three lines tall under a blank card.
    */
   function refreshComposer() {
     const input = document.getElementById("practice-input");
+    const card = document.getElementById("composer-preview");
+    const expand = document.getElementById("preview-expand");
+
     const text = input.value;
+    const hasText = Boolean(text.trim());
+    const capturing = hasText && (Dictation.active() || typingRecent);
+    const expanded = hasText && card.classList.contains("expanded");
+    const onCard = capturing || expanded;
+
+    document.getElementById("preview-body").textContent = text;
+    document.getElementById("preview-count").textContent = countOf(text);
+    document.getElementById("preview-label").textContent = labelFor(capturing, expanded);
+    card.classList.toggle("capturing", capturing && !expanded);
+    card.hidden = !onCard;
+
+    // Nothing to expand and nothing to collapse back into.
+    expand.hidden = !hasText;
+    if (!hasText) setExpanded(false);
+
+    input.classList.toggle("tucked", onCard);
+    if (onCard) {
+      input.style.height = "0px";
+      return;
+    }
 
     // Collapsing to `auto` first is what allows it to shrink again; read
     // against a fixed height, scrollHeight can only ever grow. The floor
     // and ceiling are CSS's business, not this function's.
     input.style.height = "auto";
     input.style.height = `${input.scrollHeight}px`;
+  }
 
-    const card = document.getElementById("composer-preview");
-    card.hidden = !text.trim();
-    document.getElementById("preview-body").textContent = text;
-    document.getElementById("preview-count").textContent = countOf(text);
-
-    // An expanded card holding nothing would reopen empty next time.
-    if (card.hidden) collapsePreview();
+  function labelFor(capturing, expanded) {
+    if (expanded) return "Your answer";
+    if (Dictation.active()) return "Listening";
+    if (capturing) return "Writing";
+    return "Your answer";
   }
 
   function countOf(text) {
@@ -652,7 +717,9 @@ const Practice = (() => {
   }
 
   /**
-   * Grow the preview into a full reading view and back.
+   * Grow the preview into a full reading view and back. Available in
+   * either state, which is why its button sits in the composer row
+   * rather than inside the card it opens.
    *
    * The collapsed card fades its bottom edge instead of cutting a line
    * in half, which is what signals there's more without a scrollbar
@@ -660,18 +727,36 @@ const Practice = (() => {
    * comes off and the card scrolls instead.
    */
   function toggleExpand() {
-    const card = document.getElementById("composer-preview");
-    setExpanded(!card.classList.contains("expanded"));
+    const open = !document.getElementById("composer-preview").classList.contains("expanded");
+    setExpanded(open);
+    // Closing the card while words are still arriving would hand back a
+    // box that's about to be tucked away again; settling first means
+    // collapse always lands on the editor.
+    if (!open) settleTyping();
+    refreshComposer();
+    if (!open) document.getElementById("practice-input").focus();
   }
 
-  function collapsePreview() {
+  /**
+   * The way back to a caret. While the card is up the box is collapsed
+   * and can't be clicked, so the text itself is the target — tapping it
+   * stops the capture and returns the editor.
+   */
+  function editFromPreview() {
+    endDictation();
+    settleTyping();
     setExpanded(false);
+    refreshComposer();
+    document.getElementById("practice-input").focus();
   }
 
   function setExpanded(open) {
     const card = document.getElementById("composer-preview");
     const button = document.getElementById("preview-expand");
     card.classList.toggle("expanded", open);
+    // The icon swap is driven from the composer, since that's where the
+    // button lives and the card may be hidden when it's pressed.
+    document.getElementById("practice-composer").classList.toggle("composer-open", open);
     button.setAttribute("aria-expanded", String(open));
     button.setAttribute("aria-label", open ? "Collapse your answer" : "Expand your answer");
     button.title = open ? "Collapse" : "Expand to read it all";
@@ -685,8 +770,10 @@ const Practice = (() => {
     if (!said || waiting) return;
 
     // Dictating and then sending shouldn't leave the microphone running
-    // over the top of the reply.
+    // over the top of the reply, and the composer has to land on idle so
+    // the empty box comes back rather than a tucked one.
     endDictation();
+    settleTyping();
 
     // In voice mode the composer is a side channel into the same
     // conversation, so Voice takes it and answers out loud. It only
@@ -851,15 +938,22 @@ const Practice = (() => {
     const prefix = typed ? `${typed} ` : "";
 
     setMic(true);
+    // The card takes over the moment the mic opens, before a word lands,
+    // so the surfaces don't swap a beat late.
+    refreshComposer();
+
     Dictation.start({
       text(transcript) {
         input.value = prefix + transcript;
-        // Assigning .value fires no `input` event, so the box has to be
-        // resized by hand or a dictated paragraph stays one line tall.
+        // Assigning .value fires no `input` event, so nothing else would
+        // tell the composer that the message just changed.
         refreshComposer();
       },
       end() {
         setMic(false);
+        // Dictation.active() is already false here, so this is what hands
+        // the box back with the transcript in it, ready to edit.
+        refreshComposer();
         input.focus();
       },
       error: note,
@@ -869,6 +963,7 @@ const Practice = (() => {
   function endDictation() {
     Dictation.stop();
     setMic(false);
+    refreshComposer();
   }
 
   function setMic(on) {

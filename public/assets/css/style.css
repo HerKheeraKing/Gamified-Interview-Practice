@@ -1367,32 +1367,11 @@ main {
   color: var(--text-faint);
 }
 
-.preview-expand {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
-
-.preview-expand:hover {
-  border-color: var(--border-glow);
-  color: var(--text-primary);
-}
-
 /* One button, two states — the icon swaps rather than the button moving,
    so the expand control stays put between collapsed and expanded. */
-.preview-expand .icon-shut,
-.composer-preview.expanded .preview-expand .icon-open { display: none; }
-.composer-preview.expanded .preview-expand .icon-shut { display: block; }
+#preview-expand .icon-shut,
+.composer-open #preview-expand .icon-open { display: none; }
+.composer-open #preview-expand .icon-shut { display: block; }
 
 .preview-body {
   margin: 0;
@@ -1403,6 +1382,8 @@ main {
   color: var(--text-primary);
   white-space: pre-wrap;
   overflow-wrap: break-word;
+  cursor: text;
+  transition: font-size 0.18s ease, max-height 0.18s ease;
 
   /* Fades the cut rather than slicing a line in half, which is what
      tells you there's more to read without needing a scrollbar to say
@@ -1411,10 +1392,20 @@ main {
   mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
 }
 
+/* Mid-capture the card is the only surface showing the message, so it
+   gets the room the collapsed box gave up — larger type, more lines. */
+.composer-preview.capturing .preview-body {
+  max-height: 168px;
+  font-size: 14.5px;
+  line-height: 1.65;
+}
+
 .composer-preview.expanded .preview-body {
   max-height: 46vh;
   overflow-y: auto;
   padding-right: 6px;
+  font-size: 14.5px;
+  line-height: 1.7;
   -webkit-mask-image: none;
   mask-image: none;
 }
@@ -1458,7 +1449,16 @@ main {
   font-size: 13px;
   line-height: 1.5;
   outline: none;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+
+  /* Height and padding are in here so collapsing and reopening reads as
+     the editor settling in and out, not as a flicker. */
+  transition:
+    height 0.2s ease,
+    min-height 0.2s ease,
+    padding 0.2s ease,
+    opacity 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 
   /* Three responsibilities, three owners. min-height sets the floor —
      it opens three lines tall, because an interview answer is a
@@ -1484,6 +1484,34 @@ main {
 }
 
 .practice-input::-webkit-scrollbar { display: none; }
+
+/* Collapsed out of the way while the preview card carries the message,
+   so the same text is never on screen twice.
+ *
+ * Collapsed, not hidden. `display: none` and `visibility: hidden` both
+ * drop focus, and a textarea that loses focus stops receiving
+ * keystrokes — the box would vanish mid-word and typing would simply
+ * stop. Squeezing it to nothing keeps the element focused and the caret
+ * alive behind the card, so the letters keep arriving and the box comes
+ * back with the cursor exactly where it was left.
+ *
+ * JS sets height to 0 in the same pass; min-height has to yield or the
+ * 80px floor would hold it open. */
+.practice-input.tucked {
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-top-width: 0;
+  border-bottom-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .practice-input,
+  .preview-body { transition: none; }
+}
 
 .practice-input::placeholder { color: var(--text-faint); }
 
