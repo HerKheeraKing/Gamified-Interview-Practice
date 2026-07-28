@@ -1427,13 +1427,69 @@ main {
 .composer-preview:not([hidden]) + .practice-composer { margin-top: 10px; }
 
 /* flex-end, not stretch: the field grows upward as the answer wraps, and
-   the two buttons stay pinned to its last line rather than stretching
-   into tall slabs beside a five-line paragraph. */
+   the buttons stay pinned to its last line rather than stretching into
+   tall slabs beside a five-line paragraph.
+ *
+ * Two gaps, not one. The controls belong to each other and only loosely
+ * to the box, so a single `gap` set them all the same distance apart and
+ * the whole row read as one undifferentiated strip. The box now stands
+ * well clear of the controls while the controls stay tight together. */
 .practice-composer:not([hidden]) {
   display: flex;
   align-items: flex-end;
-  gap: 10px;
+  gap: 20px;
   margin-top: 18px;
+}
+
+.composer-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The device picker. Deliberately quiet and narrow — it's a confirmation
+   that the right microphone is in play, not a control anyone needs to
+   touch twice. */
+.mic-select {
+  flex: 0 0 auto;
+  max-width: 132px;
+  height: 38px;
+  padding: 0 26px 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+  background-color: rgba(0, 0, 0, 0.25);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.18s ease;
+
+  /* Native arrow off, own chevron on, so it matches the round controls
+     beside it instead of dropping an OS widget into the glass. */
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a95ab' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 12px 12px;
+  text-overflow: ellipsis;
+}
+
+.mic-select[hidden] { display: none; }
+
+.mic-select:hover,
+.mic-select:focus {
+  border-color: var(--border-glow);
+  color: var(--text-primary);
+}
+
+/* The popup is drawn by the OS, so it needs a solid background of its
+   own — a translucent one renders as unreadable dark-on-dark. */
+.mic-select option {
+  background: var(--bg-panel-solid);
+  color: var(--text-primary);
 }
 
 .practice-input {

@@ -152,6 +152,28 @@ is a turn in that same conversation and is answered out loud like any
 other — so it works before the mic is ever opened, without triggering a
 permission prompt just to ask a clarifying question.
 
+### The microphone picker can report, not command
+
+`SpeechRecognition` has no device parameter. Its whole surface is `lang`,
+`continuous`, `interimResults`, `maxAlternatives`, `phrases` and
+`processLocally` — there is nowhere to name an input, and the recogniser
+takes whatever the browser treats as default.
+
+So the picker in the composer does two honest things: it names the audio
+inputs the machine has, and it holds the chosen one open with
+`getUserMedia` for the length of a session. In Chrome that usually
+steers capture onto that device, because the recogniser attaches to the
+live stream — but that is an implementation detail, not a contract.
+
+**If a choice doesn't take, change the default input in your OS sound
+settings.** That is the only guaranteed lever, and the select's tooltip
+says so rather than implying otherwise.
+
+Device labels are withheld by `enumerateDevices()` until the page has
+been granted a microphone at least once, so the list reads "Microphone
+1, 2" until you first press dictate — entering a practice mode never
+spends a permission prompt just to populate a dropdown.
+
 `Dictation` is a separate module from `Voice` despite driving the same
 recogniser. Voice owns turn-taking, synthesis and a conversation with
 Coach; Text Practice wants none of that — just words in a box to review

@@ -268,6 +268,140 @@ const Speaker = (() => {
 const SpeechEngine = window.SpeechRecognition || window.webkitSpeechRecognition || null;
 
 /**
+ * Which microphone is in play.
+ *
+ * Read this before trusting the picker: SpeechRecognition has no device
+ * parameter. Its entire surface is lang, continuous, interimResults,
+ * maxAlternatives, phrases and processLocally — there is nowhere to name
+ * an input, and the recogniser takes whatever the browser considers the
+ * default. No amount of code here changes that.
+ *
+ * What it can do is `hold` the chosen device open with getUserMedia for
+ * the length of a session. In Chrome that usually steers capture onto
+ * that device, because the recogniser attaches to the live stream — but
+ * that's an implementation detail, not a guarantee, and it can stop
+ * being true. So this is honest as *visibility*: it names the inputs the
+ * machine has and which one is being requested. When a choice doesn't
+ * take, the fix is the OS default, and the UI says so rather than
+ * pretending otherwise.
+ *
+ * Labels are the other wrinkle. enumerateDevices() returns entries with
+ * empty labels until the page has been granted a microphone at least
+ * once, so an unprimed list is "Microphone 1, 2, 3". `prime` trades a
+ * permission prompt for real names, which is why it's only called from
+ * places where the detective has already reached for the microphone.
+ */
+const Microphones = (() => {
+  const KEY = "caseFiles.mic.v1";
+  const media = navigator.mediaDevices || null;
+
+  let held = null;
+
+  function supported() {
+    return Boolean(media && media.enumerateDevices && media.getUserMedia);
+  }
+
+  function chosen() {
+    try {
+      return localStorage.getItem(KEY) || "";
+    } catch (err) {
+      return "";
+    }
+  }
+
+  function choose(deviceId) {
+    try {
+      if (deviceId) {
+        localStorage.setItem(KEY, deviceId);
+      } else {
+        localStorage.removeItem(KEY);
+      }
+    } catch (err) {
+      console.warn("Couldn't remember the microphone choice:", err);
+    }
+  }
+
+  /** [{ id, label }] for every audio input. Empty when unsupported. */
+  async function list({ prime = false } = {}) {
+    if (!supported()) {
+      return [];
+    }
+
+    if (prime && !(await named())) {
+      await grantOnce();
+    }
+
+    try {
+      const devices = await media.enumerateDevices();
+      return devices
+        .filter((d) => d.kind === "audioinput")
+        .map((d, i) => ({ id: d.deviceId, label: d.label || `Microphone ${i + 1}` }));
+    } catch (err) {
+      return [];
+    }
+  }
+
+  /** True when the browser is already willing to tell us device names. */
+  async function named() {
+    try {
+      const devices = await media.enumerateDevices();
+      return devices.some((d) => d.kind === "audioinput" && d.label);
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /** Ask for a microphone purely to unlock the labels, then let it go. */
+  async function grantOnce() {
+    try {
+      const stream = await media.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+    } catch (err) {
+      // Declined. The list stays anonymous, which is a worse UI but not
+      // a broken one.
+    }
+  }
+
+  /**
+   * Open the chosen device and keep it open. No-op when the detective
+   * hasn't picked one — then the browser default is exactly what's
+   * wanted and grabbing a stream would only add a second claim on it.
+   */
+  async function hold() {
+    release();
+    const id = chosen();
+    if (!id || !supported()) {
+      return false;
+    }
+    try {
+      held = await media.getUserMedia({ audio: { deviceId: { exact: id } } });
+      return true;
+    } catch (err) {
+      // Unplugged since it was chosen, most likely. The recogniser still
+      // runs on the default, which beats refusing to listen at all.
+      console.warn("Chosen microphone unavailable:", err.message);
+      held = null;
+      return false;
+    }
+  }
+
+  function release() {
+    if (!held) return;
+    held.getTracks().forEach((track) => track.stop());
+    held = null;
+  }
+
+  /** Fires when a device is plugged in or removed. */
+  function onChange(handler) {
+    if (media && "ondevicechange" in media) {
+      media.addEventListener("devicechange", handler);
+    }
+  }
+
+  return { supported, list, chosen, choose, hold, release, onChange };
+})();
+
+/**
  * A spoken conversation, as a four-state machine.
  *
  *   idle → listening → thinking → speaking → listening → …
@@ -343,10 +477,14 @@ const Voice = (() => {
   }
 
   /** Start listening. The conversation must already be attached. */
-  function openMic() {
+  async function openMic() {
     if (!session) return;
     session.mic = true;
-    listen();
+    // Claim the chosen input before the recogniser starts, so it has
+    // something to attach to. See Microphones for what this does and
+    // doesn't promise.
+    await Microphones.hold();
+    if (session && session.mic) listen();
   }
 
   /** Stop listening but keep the conversation and its history. */
@@ -355,6 +493,7 @@ const Voice = (() => {
     session.mic = false;
     clearTimeout(session.silence);
     quiet();
+    Microphones.release();
     Speaker.stop();
     setState("idle");
   }
@@ -574,13 +713,18 @@ const Voice = (() => {
  */
 const Dictation = (() => {
   let recogniser = null;
+  // Claiming the microphone is asynchronous, so there's a window where
+  // the session exists but the recogniser doesn't. `pending` covers it:
+  // without it a second click during that gap starts a rival engine, and
+  // `active()` reports "not listening" while the mic is being opened.
+  let pending = null;
 
   function supported() {
     return Boolean(SpeechEngine);
   }
 
   function active() {
-    return Boolean(recogniser);
+    return Boolean(recogniser || pending);
   }
 
   /**
@@ -593,9 +737,18 @@ const Dictation = (() => {
    *            context arrives, so appending fragments would strand the
    *            corrections it makes.
    */
-  function start(on) {
+  async function start(on) {
     stop();
     const handlers = { text() {}, end() {}, error() {}, ...on };
+
+    // Claim the chosen input first — see Microphones for the caveat.
+    const token = {};
+    pending = token;
+    await Microphones.hold();
+    if (pending !== token) {
+      return; // stopped, or restarted, while the device was opening
+    }
+    pending = null;
 
     const engine = new SpeechEngine();
     engine.continuous = true;
@@ -635,6 +788,8 @@ const Dictation = (() => {
   }
 
   function stop() {
+    pending = null;
+    Microphones.release();
     if (!recogniser) return;
     const engine = recogniser;
     recogniser = null;

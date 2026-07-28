@@ -235,6 +235,18 @@
                 autocomplete="off"
                 placeholder="Type your answer and hit enter"
               ></textarea>
+              <!-- Grouped so the gap between the box and the controls
+                   can differ from the gap between the controls. -->
+              <div class="composer-actions">
+
+              <select
+                id="mic-select"
+                class="mic-select"
+                aria-label="Microphone"
+                title="Which microphone to open. Browser speech recognition follows your system default input, so if a choice here doesn't take, change the default in your OS sound settings."
+                hidden
+              ></select>
+
               <button
                 type="button"
                 class="mic-btn"
@@ -278,6 +290,7 @@
                 </svg>
               </button>
               <button type="button" class="composer-btn" id="practice-send">Send</button>
+              </div>
             </div>
 
             <div class="practice-stage" id="stage-handoff" hidden>

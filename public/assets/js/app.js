@@ -517,6 +517,11 @@ const Practice = (() => {
 
     document.getElementById("preview-expand").addEventListener("click", toggleExpand);
     document.getElementById("practice-mic").addEventListener("click", toggleDictation);
+
+    const mics = document.getElementById("mic-select");
+    mics.addEventListener("change", () => Microphones.choose(mics.value));
+    // Plugging in AirPods mid-session should show up without a reload.
+    Microphones.onChange(() => listMics());
     document.getElementById("voice-toggle").addEventListener("click", toggleVoice);
     document.getElementById("handoff-copy").addEventListener("click", copyPrompt);
   }
@@ -570,6 +575,11 @@ const Practice = (() => {
     // visibly different things with the same icon.
     document.getElementById("practice-mic").hidden =
       mode !== "text" || !Dictation.supported();
+
+    // The picker stays up in Live Voice too — the device matters just as
+    // much there, and the orb's mic button is nowhere near it.
+    document.getElementById("mic-select").hidden = mode === "handoff";
+    listMics();
 
     // Voice mode opens the conversation immediately but not the
     // microphone — a typed aside is a valid first turn, and it shouldn't
@@ -941,6 +951,9 @@ const Practice = (() => {
     // The card takes over the moment the mic opens, before a word lands,
     // so the surfaces don't swap a beat late.
     refreshComposer();
+    // The permission prompt is happening regardless now, so this is the
+    // cheap moment to turn "Microphone 1, 2" into real device names.
+    listMics({ prime: true });
 
     Dictation.start({
       text(transcript) {
@@ -964,6 +977,59 @@ const Practice = (() => {
     Dictation.stop();
     setMic(false);
     refreshComposer();
+  }
+
+  /* ---- which microphone ---- */
+
+  /**
+   * Fill the device picker.
+   *
+   * `prime` decides whether it's willing to spend a permission prompt to
+   * learn the real device names. Entering a mode isn't worth one — the
+   * list shows up as "Microphone 1, 2" and nobody has asked for the
+   * microphone yet. Reaching for dictation is, because the prompt is
+   * coming anyway.
+   *
+   * What it can't do is make the recogniser obey. SpeechRecognition
+   * takes no device, so this reports and requests rather than commands;
+   * the select's tooltip says as much, and the OS default is the real
+   * lever. Showing which inputs exist is still the point — it's the
+   * difference between suspecting the wrong mic and knowing.
+   */
+  async function listMics({ prime = false } = {}) {
+    const select = document.getElementById("mic-select");
+    if (!Microphones.supported() || !Dictation.supported()) {
+      select.hidden = true;
+      return;
+    }
+
+    const devices = await Microphones.list({ prime });
+    if (devices.length === 0) {
+      select.hidden = true;
+      return;
+    }
+
+    const saved = Microphones.chosen();
+    select.innerHTML =
+      `<option value="">System default mic</option>` +
+      devices
+        .map((d) => `<option value="${escapeAttr(d.id)}">${escapeText(d.label)}</option>`)
+        .join("");
+
+    // A remembered device that has since been unplugged falls back to
+    // the default rather than showing a selection that isn't real.
+    select.value = devices.some((d) => d.id === saved) ? saved : "";
+    if (select.value !== saved) Microphones.choose("");
+
+    select.hidden = mode === "handoff";
+  }
+
+  function escapeAttr(value) {
+    return String(value).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`);
+  }
+
+  function escapeText(value) {
+    return String(value).replace(/[&<>]/g, (c) => `&#${c.charCodeAt(0)};`);
   }
 
   function setMic(on) {
