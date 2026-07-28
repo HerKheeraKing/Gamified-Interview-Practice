@@ -1054,6 +1054,24 @@ main {
     inset 0 0 12px rgba(255, 255, 255, 0.06);
 }
 
+/* The optional second field. Set back from the codename above it — a
+   quieter border and a smaller cap — because it is optional and should
+   not read as a second thing that must be filled in. */
+.login-code {
+  margin-top: 12px;
+  border-color: rgba(165, 230, 255, 0.12);
+  font-size: 13px;
+  letter-spacing: 1.5px;
+}
+
+.login-hint {
+  margin: 10px 2px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  text-align: center;
+}
+
 .login-error {
   min-height: 18px;
   margin: 10px 0 0;
@@ -1183,6 +1201,27 @@ main {
 }
 
 .practice-mode.active .pm-sub { color: var(--accent-soft); }
+
+/* Locked: the two AI modes when this account has no budget for them.
+   Dimmed rather than disabled, and still clickable, because the click is
+   how the panel gets to say what an invite code is and that Send to
+   Claude does the same job for free. A dead button explains nothing.
+   The padlock is a pseudo-element so no markup changes state. */
+.practice-mode.locked {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.practice-mode.locked .pm-name::after {
+  content: " 🔒";
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.practice-mode.locked:hover {
+  opacity: 0.8;
+  border-color: rgba(255, 255, 255, 0.28);
+}
 
 .practice-panel {
   margin-top: 14px;

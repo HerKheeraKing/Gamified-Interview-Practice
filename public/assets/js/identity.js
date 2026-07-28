@@ -60,7 +60,42 @@ const Identity = (() => {
     return id ? id.token : null;
   }
 
-  return { read, save, clear, isSignedIn, username, token };
+  /**
+   * What the server last said about this account's AI access:
+   * { tier: "owner" | "invited" | "free", ai, cap?, spent?, remaining? }.
+   *
+   * A cached answer, and treated as one. It is here so the two AI modes
+   * can be greyed out before a click rather than after a failed request,
+   * which is a nicer thing to look at but not a security boundary — the
+   * Worker re-checks the tier on every /api/coach call and does not
+   * consult this. Editing it in devtools changes what the buttons look
+   * like and nothing about what they can spend.
+   *
+   * Signed out reads as free, because a request with no token cannot
+   * reach the coach anyway.
+   */
+  function access() {
+    const id = read();
+    if (!id || !id.token) {
+      return { tier: "free", ai: false };
+    }
+    return id.access || { tier: "free", ai: false };
+  }
+
+  /** Fold a fresh access summary into the stored identity. */
+  function setAccess(summary) {
+    const id = read();
+    if (!id) {
+      return;
+    }
+    save({ ...id, access: summary || { tier: "free", ai: false } });
+  }
+
+  function canCoach() {
+    return isSignedIn() && access().ai === true;
+  }
+
+  return { read, save, clear, isSignedIn, username, token, access, setAccess, canCoach };
 })();
 
 /* ---------------------------------------------------------- */
@@ -71,12 +106,40 @@ const Api = (() => {
   /**
    * Sign in (creating the account if it's new) and hand back the
    * server's copy of the log in the same round trip.
-   * Resolves to { username, log } or throws with a readable message.
+   *
+   * `code` is optional: an invite code for a beta tester, the passphrase
+   * for the owner account, or nothing at all for the free tier, which is
+   * the common case and a perfectly good place to be.
+   *
+   * Resolves to { username, log, access } or throws with a readable
+   * message. Wrong code and wrong passphrase both surface as the
+   * server's own sentence, because they are different problems.
    */
-  async function signIn(username, password) {
-    const res = await send("/api/session", "POST", { username, password });
-    Identity.save({ username: res.username, token: res.token });
-    return { username: res.username, log: res.log };
+  async function signIn(username, code) {
+    const res = await send("/api/session", "POST", { username, code });
+    Identity.save({ username: res.username, token: res.token, access: res.access });
+    return { username: res.username, log: res.log, access: res.access };
+  }
+
+  /**
+   * Re-read the AI access tier. Cheap, and worth doing on load: a cap
+   * raised or a code revoked since the last sign-in should show up
+   * without making anyone sign out and back in to find out.
+   */
+  async function refreshAccess() {
+    if (!Identity.isSignedIn()) {
+      return null;
+    }
+    try {
+      const res = await send("/api/access", "GET");
+      Identity.setAccess(res.access);
+      return res.access;
+    } catch (err) {
+      if (err.status === 401) {
+        Identity.clear();
+      }
+      return null;
+    }
   }
 
   /** Server log, or null when signed out / unreachable. */
@@ -141,5 +204,5 @@ const Api = (() => {
     return data;
   }
 
-  return { signIn, pullLog, pushLog, clearLog };
+  return { signIn, refreshAccess, pullLog, pushLog, clearLog };
 })();

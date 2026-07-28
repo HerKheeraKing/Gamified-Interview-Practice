@@ -1,9 +1,11 @@
 -- ============================================================
 -- The Interview Case Files — D1 schema
 --
--- Two tables, one job each:
---   detectives  - who you are
---   case_log    - what you've done
+-- Four tables, one job each:
+--   detectives    - who you are
+--   sessions      - which devices are signed in as you
+--   case_log      - what you've done
+--   invite_codes  - who may spend money on AI coaching, and how much
 --
 -- Passwordless today: password_hash / password_salt stay NULL and
 -- the Worker treats a NULL hash as "no credential required". Adding
@@ -17,7 +19,16 @@ CREATE TABLE IF NOT EXISTS detectives (
   password_hash TEXT,
   password_salt TEXT,
   created_at    TEXT    NOT NULL,
-  last_seen_at  TEXT    NOT NULL
+  last_seen_at  TEXT    NOT NULL,
+  -- The invite code this account redeemed, if any. Nullable because the
+  -- free tier is the default and needs no row of its own: manual scoring
+  -- and Send to Claude cost nothing, so an account with NULL here is a
+  -- complete, working account rather than a half-provisioned one.
+  --
+  -- Not a foreign key on purpose. Deleting a spent code should not cascade
+  -- into deleting the detectives who used it; they simply fall back to the
+  -- free tier, which is exactly the behaviour a revoked code should have.
+  access_code   TEXT    COLLATE NOCASE
 );
 
 -- Sessions are separated from detectives so a future password flow can
@@ -50,3 +61,37 @@ CREATE TABLE IF NOT EXISTS case_log (
 
 CREATE INDEX IF NOT EXISTS idx_case_log_detective
   ON case_log (detective_id, logged_at);
+
+-- ============================================================
+-- Invite codes: the spend cap on AI coaching.
+--
+-- One row is one budget, not one person. A code handed to three beta
+-- testers gives them a shared $0.50, which is the honest shape of the
+-- thing being limited — the API bill does not care who typed the answer.
+--
+-- spent_usd is real money: token counts from each turn priced against
+-- Anthropic's published per-model rates, not a request counter. Two
+-- turns of the same length cost the same, and a rambling turn costs
+-- more than a terse one, because that is what actually gets billed.
+--
+-- REAL rather than INTEGER cents because cache-read tokens are priced at
+-- $0.20/MTok — a single turn can legitimately cost a fraction of a cent,
+-- and rounding those to zero would let an unbounded number of them
+-- through for free.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS invite_codes (
+  code         TEXT    PRIMARY KEY COLLATE NOCASE,
+  label        TEXT    NOT NULL DEFAULT '',
+  cap_usd      REAL    NOT NULL,
+  spent_usd    REAL    NOT NULL DEFAULT 0,
+  turns        INTEGER NOT NULL DEFAULT 0,
+  -- Revocation that survives a refund. Setting active = 0 stops a code
+  -- immediately without touching spent_usd, so the history of what it
+  -- cost stays readable after it is switched off.
+  active       INTEGER NOT NULL DEFAULT 1,
+  created_at   TEXT    NOT NULL,
+  last_used_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_detectives_access_code
+  ON detectives (access_code);

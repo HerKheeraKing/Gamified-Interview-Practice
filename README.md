@@ -18,6 +18,8 @@ questions now, technical questions added in future rounds.
 │       └── images/detective.png
 ├── worker/index.js         # Cloudflare Worker: the sync API + AI proxy
 ├── schema.sql              # D1 tables
+├── migrations/             # one file per schema change, run once each
+├── scripts/                # offline checks — no deploy, no API spend
 └── README.md
 ```
 
@@ -55,8 +57,8 @@ everything lives in `localStorage`. Signing in adds a Cloudflare D1
 mirror so the same case log follows you between devices.
 
 ```
-worker/index.js              # API: /api/session, /api/log (GET/POST/DELETE)
-schema.sql                   # D1 tables: detectives, sessions, case_log
+worker/index.js              # API: /api/session, /api/log, /api/access, /api/admin/*
+schema.sql                   # D1 tables: detectives, sessions, case_log, invite_codes
 public/assets/js/identity.js # client: saved username + the only fetch() calls
 ```
 
@@ -72,6 +74,13 @@ Passwordless for now. `password_hash` / `password_salt` already exist on
 `detectives`, and `Credentials` in the Worker is the single place that
 decides whether a login is valid — adding passwords means changing that
 module and nothing else.
+
+The login modal has a second, optional field beside the codename. It
+carries an invite code for a beta tester or the passphrase for the owner
+account — one field, because the person typing it was handed one string
+and doesn't need to know there are two mechanisms. Leaving it blank is a
+complete and working way to use the site, not a step being skipped. See
+[Access tiers](#access-tiers-and-the-spend-cap).
 
 ### First-time setup
 
@@ -101,7 +110,8 @@ account and without leaking anything:
 
 ```json
 { "ok": true, "db_bound": true, "schema_ready": true,
-  "missing_tables": [], "anthropic_key_set": true }
+  "missing_tables": [], "anthropic_key_set": true,
+  "owner_passphrase_set": true, "admin_token_set": true }
 ```
 
 - `db_bound: false` — the `[[d1_databases]]` block is missing or the
@@ -109,10 +119,15 @@ account and without leaking anything:
 - `schema_ready: false` — the binding is fine and the database is empty.
   Run `npm run db:init:remote`. **A `d1 create` makes an empty database;
   the schema is a separate step, and renaming or recreating either the
-  Worker or the database does not carry it over.**
+  Worker or the database does not carry it over.** If `missing_tables`
+  lists only some tables, the database predates a schema change — run
+  `npm run db:migrate:remote` instead.
 - `anthropic_key_set: false` — only the two AI modes are affected, never
   login. Run `npx wrangler secret put ANTHROPIC_API_KEY`. Secrets are
   attached to a Worker *by name*, so a rename leaves them behind.
+- `owner_passphrase_set: false` — the `kheera` codename cannot be signed
+  in as at all. See [Access tiers](#access-tiers-and-the-spend-cap).
+- `admin_token_set: false` — `/api/admin/*` answers 404. Same fix.
 
 `wrangler tail` logs the failing method and path alongside the error.
 
@@ -128,6 +143,141 @@ manually adjustable no matter which one filled them.
 | Text Practice | Type an answer — or dictate it with the mic button and edit before sending. Claude streams back coaching plus a follow-up and fills the score dots | API |
 | Live Voice | The same conversation held out loud, with a glass orb for idle / listening / thinking / speaking. A text box stays open for a typed aside, which is answered out loud like any other turn | API |
 | Send to Claude | Copies the question plus a full interviewer prompt to the clipboard. Practise in any Claude session, come back, score by hand | free |
+
+## Access tiers and the spend cap
+
+The two API modes cost real money on every turn, so they are gated. The
+manual scorecard, XP, streaks, cross-device sync and Send to Claude are
+not — they cost nothing, so gating them would buy nothing.
+
+| Tier | Who | Text Practice / Live Voice | Everything else |
+| --- | --- | --- | --- |
+| **owner** | codename `kheera` **plus** `OWNER_PASSPHRASE` | unlimited | yes |
+| **invited** | any codename **plus** a valid invite code | until that code's cap is spent | yes |
+| **free** | any other codename, no code | no — the request is never made | yes |
+
+A free-tier detective who opens Text Practice sees the two modes marked
+with a padlock and a line explaining that AI coaching needs an invite
+code and that Send to Claude does the same job for nothing. No
+`/api/coach` call is made, so the tier costs nothing to refuse.
+
+### Why the owner needs a passphrase
+
+The codename field is free text and creates an account for whatever is
+typed into it. Without a secret, `kheera` would not be an identity — it
+would be a nine-keystroke bypass of the entire cap system. The passphrase
+is checked *before* the row is read or created, so the codename cannot
+even be squatted by a stranger signing in first.
+
+`OWNER_PASSPHRASE` unset means nobody can sign in as `kheera` at all.
+That is the intended failure: an owner locked out is recoverable, a
+codename anyone can type for unlimited API access is not.
+
+### The cap is in dollars, not requests
+
+`invite_codes.spent_usd` holds real money: the token counts Anthropic
+reports for each turn, priced against the published per-model rates in
+the `Pricing` module of `worker/index.js`. Counting requests would have
+been one line and wrong in both directions — a one-line clarifying
+question and a full coached answer with a long transcript behind it are
+one request each and differ by an order of magnitude.
+
+Four token classes are priced separately because prompt caching is on.
+The cached instruction block is ~1,500 tokens that would otherwise be
+charged at full input price every turn; read from cache it is a tenth of
+that. Pricing cache reads as fresh input would fire the cap roughly ten
+times early on exactly the deployment being careful with money.
+
+**Charge first, settle after.** A turn's true cost isn't known until the
+model stops talking, so the Worker charges an upper bound before calling
+Anthropic and refunds the difference from inside the stream. Doing it the
+intuitive way round would mean the cap is only ever checked against turns
+that already finished, and a burst of simultaneous requests would all
+pass a check none of them had paid for. The single atomic `UPDATE ...
+WHERE spent_usd < cap_usd` is what makes exactly one of them the one that
+crosses the line.
+
+The gap fails safe: if the browser is closed mid-answer the settle never
+runs and the hold stands, so a code can be over-billed by at most one
+turn's ceiling and never under-billed. That is why the hold is sized to
+the transcript actually being sent rather than to the `MAX_TURNS ×
+MAX_CHARS` limit — the theoretical worst case is ~10× a real turn, and
+holding it would make an abandoned answer cost ten.
+
+**The pricing table goes stale silently.** It is a hardcoded copy of
+[Anthropic's published rates](https://platform.claude.com/docs/en/about-claude/pricing)
+(checked 2026-07-28), because a live pricing lookup on the request path
+would be a second thing that can fail mid-interview. An unrecognised
+`COACH_MODEL` is billed at the most expensive known rate, so a new model
+over-spends its cap slightly rather than blowing through it unnoticed.
+
+### Setup
+
+```bash
+npx wrangler secret put OWNER_PASSPHRASE   # unlocks the kheera account
+npx wrangler secret put ADMIN_TOKEN        # unlocks /api/admin/codes
+npm run db:migrate:remote                  # only if the DB predates this feature
+```
+
+Locally the same three values go in `.dev.vars` (gitignored) alongside
+`ANTHROPIC_API_KEY`.
+
+### Managing invite codes
+
+Three routes, guarded by `ADMIN_TOKEN` in an `x-admin-token` header.
+They answer **404, not 401**, when that secret is unset — an admin route
+that announces itself on an unconfigured deployment is an invitation.
+
+```bash
+BASE=https://kheeras-case-method.workers.dev
+TOKEN=$ADMIN_TOKEN
+
+# Mint a code (cap defaults to $0.50, hard maximum $100)
+curl -sX POST $BASE/api/admin/codes \
+  -H "x-admin-token: $TOKEN" -H 'content-type: application/json' \
+  -d '{"label":"beta: sam","cap_usd":0.50}'
+# -> {"code":{"code":"CASE-7F3K-92QX-M4TB","cap_usd":0.5,"spent_usd":0,...}}
+
+# See every code, dearest first
+curl -s $BASE/api/admin/codes -H "x-admin-token: $TOKEN"
+
+# Raise a cap — this revives a code that already hit its limit
+curl -sX PATCH $BASE/api/admin/codes/CASE-7F3K-92QX-M4TB \
+  -H "x-admin-token: $TOKEN" -H 'content-type: application/json' \
+  -d '{"cap_usd":2.00}'
+
+# Switch one off. spent_usd is untouched, so the history stays readable
+curl -sX PATCH $BASE/api/admin/codes/CASE-7F3K-92QX-M4TB \
+  -H "x-admin-token: $TOKEN" -H 'content-type: application/json' \
+  -d '{"active":false}'
+```
+
+Or straight at the table, which is the same rows:
+
+```bash
+npx wrangler d1 execute interview-case-files --remote \
+  --command "SELECT code, label, cap_usd, spent_usd, turns, active FROM invite_codes ORDER BY spent_usd DESC"
+```
+
+One row is one budget, not one person: a code handed to three testers
+gives them a shared cap, which is the honest shape of the thing being
+limited — the API bill does not care who typed the answer. Revoking a
+code drops those accounts to the free tier; they keep their case files,
+their XP and their sync, and lose only the two AI modes.
+
+### Checking it still holds
+
+```bash
+npm run check:access
+```
+
+Runs the real Worker against an in-memory SQLite and a stubbed Anthropic
+with known token counts, and asserts the behaviour rather than reading
+the code back: the owner passphrase is required and the codename can't be
+squatted, the free tier is refused without an upstream call, a code stops
+at its cap and the arithmetic matches a figure worked out by hand, a
+raised cap resumes the session, and a revoked code degrades to free
+without losing anyone's log. Offline, no API spend.
 
 ### The API key never reaches the browser
 

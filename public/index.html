@@ -364,6 +364,25 @@
         placeholder="CODENAME"
       />
 
+      <!-- Optional, and labelled as optional, because leaving it blank is
+           a complete and working way to use the site rather than a step
+           being skipped. It carries an access code for a beta tester and
+           the passphrase for the owner account — one field, because the
+           person typing it was handed one string. -->
+      <input
+        id="login-code"
+        class="login-input login-code"
+        type="password"
+        maxlength="64"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="ACCESS CODE (OPTIONAL)"
+      />
+      <p class="login-hint">
+        No code? Everything still works — manual scoring, XP, streaks and
+        Send to Claude. A code unlocks Text Practice and Live Voice.
+      </p>
+
       <p class="login-error" id="login-error"></p>
 
       <div class="login-actions">

@@ -6,11 +6,14 @@
  * Structure (mirrors assets/js/app.js — layers, not files):
  *   1. Responses    - JSON/error helpers, no domain knowledge
  *   2. Credentials  - the one place that decides "is this login valid"
- *   3. Detectives   - account rows + session tokens
- *   4. CaseLog      - XP entries, read and merge
- *   5. Coach        - the only place that holds the Anthropic API key
- *   6. Health       - is this deployment wired up? (bindings, schema)
- *   7. Router       - maps requests to the layers above
+ *   3. Access       - who may spend money on AI coaching, and how much
+ *   4. Detectives   - account rows + session tokens
+ *   5. CaseLog      - XP entries, read and merge
+ *   6. Pricing      - Anthropic token counts -> US dollars
+ *   7. Coach        - the only place that holds the Anthropic API key
+ *   8. Admin        - mint invite codes, read and adjust their caps
+ *   9. Health       - is this deployment wired up? (bindings, schema)
+ *  10. Router       - maps requests to the layers above
  *
  * Everything that isn't /api/* falls through to the static assets
  * binding, so the Worker serves the whole site from one deployment.
@@ -18,6 +21,12 @@
  * Passwords: the site is username-only today. Credentials is the single
  * seam where that changes — swap the body of `verify` and `register`
  * and no other layer moves.
+ *
+ * Money: /api/coach is the only route that costs anything, and Access is
+ * the only module that decides whether a given caller may trigger it.
+ * Every other layer is deliberately ignorant of tiers — the scorecard,
+ * the XP log and the sync path behave identically for a beta tester and
+ * a stranger, because none of them touch the API.
  * ------------------------------------------------------------
  */
 
@@ -117,22 +126,257 @@ const Credentials = (() => {
     return diff === 0;
   }
 
-  return { register, verify };
+  return { register, verify, constantTimeEqual: timingSafeEqual };
 })();
 
 /* ---------------------------------------------------------- */
-/* 3. DETECTIVES                                               */
+/* 3. ACCESS                                                   */
+/* ---------------------------------------------------------- */
+
+/**
+ * The answer to "may this account spend my Anthropic credit, and how
+ * much is left?".
+ *
+ * Three tiers, and the important thing about them is what they have in
+ * common: the site works in all three. Manual scoring, the XP log, the
+ * streak, sync, and Send to Claude are free of API cost and therefore
+ * free of gatekeeping. Only Text Practice and Live Voice — the two paths
+ * that reach api.anthropic.com — are tiered.
+ *
+ *   owner    "kheera", proven by OWNER_PASSPHRASE. No cap.
+ *   invited  redeemed an invite code. Capped at that code's cap_usd,
+ *            measured in real dollars.
+ *   free     everyone else. No AI coaching, no /api/coach call made.
+ *
+ * Why the owner needs a passphrase at all: the username field is free
+ * text and creates an account for whatever is typed into it. Without a
+ * secret, "kheera" is not an identity, it is a nine-keystroke bypass of
+ * the entire cap system. The passphrase is checked before the row is
+ * looked up or created, so the name cannot even be squatted.
+ *
+ * Failing closed is deliberate throughout. An unset OWNER_PASSPHRASE
+ * makes the owner name unusable rather than unguarded, and an unset
+ * ADMIN_TOKEN (see Admin) makes the admin routes 404 rather than open.
+ * The failure mode of a missing secret should be "I can't get in",
+ * never "anyone can".
+ */
+const Access = (() => {
+  const OWNER = "kheera";
+  const CODE_LENGTH = 24;
+
+  /* ---- who is this? ---- */
+
+  /** True when `username` claims the owner account, whoever typed it. */
+  function claimsOwner(env, username) {
+    return normaliseName(username) === ownerName(env);
+  }
+
+  /**
+   * True when `secret` proves the owner claim.
+   *
+   * Constant-time, and false when the deployment has no passphrase set —
+   * an empty configured value must never be satisfiable by an empty
+   * submitted one.
+   */
+  function provesOwner(env, secret) {
+    const expected = env.OWNER_PASSPHRASE || "";
+    if (!expected || typeof secret !== "string" || !secret) {
+      return false;
+    }
+    return Credentials.constantTimeEqual(secret, expected);
+  }
+
+  /**
+   * The tier this detective is currently in, with the numbers behind it.
+   *
+   * Read fresh from D1 on every call rather than cached on the session:
+   * a cap raised or a code revoked has to take effect on the next turn,
+   * not on the next sign-in, and a session token can outlive both.
+   */
+  async function summary(db, env, detective) {
+    if (isOwner(env, detective)) {
+      return { tier: "owner", ai: true };
+    }
+
+    const code = detective.access_code ? await find(db, detective.access_code) : null;
+    if (!code || code.active !== 1) {
+      // A revoked or deleted code degrades to free rather than erroring.
+      // The detective keeps their case files and their XP; they lose the
+      // two AI modes and are told why, which is the whole difference.
+      return { tier: "free", ai: false };
+    }
+
+    const remaining = Math.max(0, code.cap_usd - code.spent_usd);
+    return {
+      tier: "invited",
+      ai: remaining > 0,
+      code: code.code,
+      cap: round(code.cap_usd),
+      spent: round(code.spent_usd),
+      remaining: round(remaining),
+      turns: code.turns,
+    };
+  }
+
+  /** Owner-ness is derived from the name, because only the passphrase grants it. */
+  function isOwner(env, detective) {
+    return normaliseName(detective.username) === ownerName(env);
+  }
+
+  /* ---- invite codes ---- */
+
+  async function find(db, code) {
+    const clean = normaliseCode(code);
+    if (!clean) {
+      return null;
+    }
+    return db.prepare("SELECT * FROM invite_codes WHERE code = ?").bind(clean).first();
+  }
+
+  /**
+   * Charge `amount` against a code, but only if it is live and under cap.
+   *
+   * One statement, on purpose. Reading the balance and then writing it
+   * would leave a window between the two, and that window is precisely
+   * what a burst of parallel requests exploits — twenty callers each read
+   * $0.49 of a $0.50 cap, each conclude they are under it, and each spend.
+   * SQLite applies the WHERE and the SET together, so exactly one of the
+   * twenty can be the one that crosses the line.
+   *
+   * Returns true when the charge landed.
+   */
+  async function charge(db, code, amount) {
+    const result = await db
+      .prepare(
+        `UPDATE invite_codes
+            SET spent_usd = spent_usd + ?, turns = turns + 1, last_used_at = ?
+          WHERE code = ? AND active = 1 AND spent_usd < cap_usd`
+      )
+      .bind(amount, new Date().toISOString(), normaliseCode(code))
+      .run();
+
+    return (result.meta && result.meta.changes) === 1;
+  }
+
+  /**
+   * Replace a provisional charge with what the turn actually cost.
+   *
+   * Charging happens before the request and settling after it, because
+   * the true cost is not knowable until the model has stopped talking —
+   * a two-sentence reply and a rambling one bill differently, which is
+   * the entire reason this is metered in dollars rather than requests.
+   *
+   * The gap between the two is where this fails safe: if the Worker dies
+   * mid-stream or the browser walks away, the provisional charge simply
+   * stands. A code can be over-billed by one turn's worst case. It can
+   * never be under-billed, and it can never be silently un-billed.
+   */
+  async function settle(db, code, provisional, actual) {
+    await db
+      .prepare(
+        `UPDATE invite_codes
+            SET spent_usd = MAX(0, spent_usd - ? + ?)
+          WHERE code = ?`
+      )
+      .bind(provisional, actual, normaliseCode(code))
+      .run();
+  }
+
+  /** Refund a provisional charge in full — the turn never happened. */
+  async function refund(db, code, provisional) {
+    await settle(db, code, provisional, 0);
+  }
+
+  /**
+   * A fresh code: CASE-XXXX-XXXX-XXXX.
+   *
+   * The alphabet drops I, L, O, 0 and 1. These get read aloud, typed off
+   * a screenshot, and retyped from memory, and every one of those steps
+   * is where an O becomes a zero. Thirty-one characters over twelve
+   * positions is still far past guessable.
+   */
+  function mint() {
+    const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    const bytes = crypto.getRandomValues(new Uint8Array(12));
+    const body = Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join("");
+    return `CASE-${body.slice(0, 4)}-${body.slice(4, 8)}-${body.slice(8, 12)}`;
+  }
+
+  function normaliseCode(code) {
+    if (typeof code !== "string") {
+      return "";
+    }
+    return code.trim().toUpperCase().slice(0, CODE_LENGTH);
+  }
+
+  function normaliseName(username) {
+    return typeof username === "string" ? username.trim().toLowerCase() : "";
+  }
+
+  function ownerName(env) {
+    return normaliseName(env.OWNER_USERNAME || OWNER);
+  }
+
+  /** Dollars, to the tenth of a cent — below that nothing here is meaningful. */
+  function round(usd) {
+    return Math.round(usd * 10000) / 10000;
+  }
+
+  return {
+    claimsOwner,
+    provesOwner,
+    summary,
+    find,
+    charge,
+    settle,
+    refund,
+    mint,
+    normaliseCode,
+    round,
+  };
+})();
+
+/* ---------------------------------------------------------- */
+/* 4. DETECTIVES                                               */
 /* ---------------------------------------------------------- */
 
 const Detectives = (() => {
   /**
    * Log in, creating the account on first sight.
-   * Returns { token, username } or null when credentials are rejected.
+   *
+   * `secret` is the one optional field beside the codename, and it means
+   * whichever of two things the codename implies: the owner passphrase
+   * when the name is the owner's, an invite code otherwise. One field,
+   * because the detective typing it does not need to know there are two
+   * mechanisms — they were handed a string and told it unlocks coaching.
+   *
+   * Returns { token, id, username } or { error } with a sentence worth
+   * showing. Rejections are specific here rather than a blanket "those
+   * credentials didn't check out": a mistyped invite code and a wrong
+   * passphrase are different mistakes with different fixes, and the
+   * information leaked by saying so is information the person already
+   * had when they typed it.
    */
-  async function openSession(db, username, password) {
+  async function openSession(db, env, username, secret) {
     const name = normalise(username);
     if (!name) {
-      return null;
+      return { error: "Every detective needs a name." };
+    }
+
+    // Before the row is read or written, because the owner name must not
+    // be claimable — not even as an empty free-tier account that squats
+    // the codename and locks the real owner out of their own log.
+    let redeemed = null;
+    if (Access.claimsOwner(env, name)) {
+      if (!Access.provesOwner(env, secret)) {
+        return { error: "That codename is taken. It needs its passphrase." };
+      }
+    } else if (secret) {
+      const code = await Access.find(db, secret);
+      if (!code || code.active !== 1) {
+        return { error: "That access code isn't on file. Leave it blank to practise without AI coaching." };
+      }
+      redeemed = code.code;
     }
 
     const now = new Date().toISOString();
@@ -142,23 +386,31 @@ const Detectives = (() => {
       .first();
 
     if (detective) {
-      if (!(await Credentials.verify(detective, password))) {
-        return null;
+      if (!(await Credentials.verify(detective, null))) {
+        return { error: "Those credentials didn't check out." };
       }
+      // A code only ever overwrites when one was actually supplied, so
+      // signing in from a second device without retyping it does not
+      // silently demote the account to free.
       await db
-        .prepare("UPDATE detectives SET last_seen_at = ? WHERE id = ?")
-        .bind(now, detective.id)
-        .run();
-    } else {
-      const creds = await Credentials.register(password);
-      const created = await db
         .prepare(
-          `INSERT INTO detectives (username, password_hash, password_salt, created_at, last_seen_at)
-           VALUES (?, ?, ?, ?, ?) RETURNING *`
+          `UPDATE detectives
+              SET last_seen_at = ?, access_code = COALESCE(?, access_code)
+            WHERE id = ?`
         )
-        .bind(name, creds.password_hash, creds.password_salt, now, now)
+        .bind(now, redeemed, detective.id)
+        .run();
+      detective.access_code = redeemed || detective.access_code;
+    } else {
+      const creds = await Credentials.register(null);
+      detective = await db
+        .prepare(
+          `INSERT INTO detectives
+             (username, password_hash, password_salt, created_at, last_seen_at, access_code)
+           VALUES (?, ?, ?, ?, ?, ?) RETURNING *`
+        )
+        .bind(name, creds.password_hash, creds.password_salt, now, now, redeemed)
         .first();
-      detective = created;
     }
 
     const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
@@ -167,10 +419,10 @@ const Detectives = (() => {
       .bind(token, detective.id, now)
       .run();
 
-    return { token, id: detective.id, username: detective.username };
+    return { token, id: detective.id, username: detective.username, access_code: detective.access_code };
   }
 
-  /** Resolve a bearer token to a detective id, or null. */
+  /** Resolve a bearer token to a detective row, or null. */
   async function fromRequest(db, request) {
     const header = request.headers.get("authorization") || "";
     const token = header.startsWith("Bearer ") ? header.slice(7) : "";
@@ -180,7 +432,7 @@ const Detectives = (() => {
 
     const row = await db
       .prepare(
-        `SELECT d.id, d.username FROM sessions s
+        `SELECT d.id, d.username, d.access_code FROM sessions s
          JOIN detectives d ON d.id = s.detective_id
          WHERE s.token = ?`
       )
@@ -286,7 +538,97 @@ const CaseLog = (() => {
 })();
 
 /* ---------------------------------------------------------- */
-/* 5. COACH                                                    */
+/* 6. PRICING                                                  */
+/* ---------------------------------------------------------- */
+
+/**
+ * Token counts in, US dollars out.
+ *
+ * A spend cap has to be denominated in the thing that actually gets
+ * billed. Counting requests would have been a line of code, and it would
+ * have been wrong in both directions: a clarifying question that costs a
+ * twentieth of a cent and a full coached answer with a long transcript
+ * behind it are one request each and differ by an order of magnitude.
+ *
+ * Four token classes, four rates, because prompt caching is on. The
+ * cached instruction block is roughly 1,500 tokens that would otherwise
+ * be charged at full input price on every single turn; read from cache
+ * it is a tenth of that. Pricing cache reads as fresh input would have
+ * the cap fire an order of magnitude early on exactly the deployment
+ * that is being careful with money.
+ *
+ * Rates are USD per million tokens, from
+ * https://platform.claude.com/docs/en/about-claude/pricing (checked
+ * 2026-07-28). They are duplicated here rather than fetched because a
+ * pricing lookup on the request path would be a second thing that can
+ * fail while someone is mid-interview. The cost of that choice is that
+ * this table goes stale silently, so UNKNOWN below exists to make the
+ * staleness expensive in the safe direction rather than the cheap one.
+ */
+const Pricing = (() => {
+  const PER_MTOK = {
+    "claude-sonnet-5": { input: 3, cacheWrite: 3.75, cacheRead: 0.3, output: 15 },
+    "claude-opus-5": { input: 5, cacheWrite: 6.25, cacheRead: 0.5, output: 25 },
+    "claude-haiku-4-5-20251001": { input: 1, cacheWrite: 1.25, cacheRead: 0.1, output: 5 },
+    "claude-sonnet-4-5": { input: 3, cacheWrite: 3.75, cacheRead: 0.3, output: 15 },
+  };
+
+  // What an unrecognised model costs. Deliberately the most expensive row
+  // in the table above: someone setting COACH_MODEL to something new
+  // should over-spend their cap slightly, not blow through it silently.
+  const UNKNOWN = PER_MTOK["claude-opus-5"];
+
+  // Sonnet 5 runs at introductory $2/$10 through 2026-08-31 and $3/$15
+  // from 2026-09-01. The table holds the higher, permanent numbers on
+  // purpose. Encoding the discount would mean the cap changes meaning on
+  // a date nobody is watching for, and being billed less than the meter
+  // said is the direction of surprise worth having.
+
+  /** USD for one turn. `usage` is whatever Coach counted off the stream. */
+  function costOf(model, usage) {
+    const rate = PER_MTOK[model] || UNKNOWN;
+    return (
+      (usage.input * rate.input +
+        usage.cacheWrite * rate.cacheWrite +
+        usage.cacheRead * rate.cacheRead +
+        usage.output * rate.output) /
+      1e6
+    );
+  }
+
+  /**
+   * The most *this particular turn* could cost, charged up front and
+   * refunded down to the real figure once the turn is over.
+   *
+   * Sized to the transcript actually being sent rather than to the
+   * MAX_TURNS × MAX_CHARS limit, and that distinction is the difference
+   * between a workable hold and a punitive one. The theoretical worst
+   * case is around ten times a real turn, so holding it would mean a
+   * $0.50 code could only ever have five turns in flight, and a browser
+   * closed mid-answer — where the settle never runs — would forfeit ten
+   * turns' worth of budget for one.
+   *
+   * Every term here is still an upper bound, so the hold can only ever
+   * be refunded downward:
+   *   input   the transcript at the conventional four characters per
+   *           token, plus the instruction block, rounded up by treating
+   *           it as uncached
+   *   output  MAX_TOKENS, which the request itself enforces
+   */
+  function ceiling(model, { chars, systemTokens, maxTokens }) {
+    return costOf(model, {
+      input: chars / 4 + systemTokens,
+      cacheWrite: systemTokens,
+      cacheRead: 0,
+      output: maxTokens,
+    });
+  }
+
+  return { costOf, ceiling };
+})();
+
+/* ---------------------------------------------------------- */
+/* 7. COACH                                                    */
 /* ---------------------------------------------------------- */
 
 /**
@@ -319,6 +661,12 @@ const Coach = (() => {
   const MAX_TURNS = 24;
   const MAX_CHARS = 4000;
 
+  // The INTERVIEWER block below, in tokens. Only used to price the worst
+  // case up front, so it is rounded generously upward — it must not
+  // under-state the ceiling. It is also the number that has to stay above
+  // 1,024 for the prompt cache to engage at all; see systemPrompt.
+  const SYSTEM_TOKENS = 1800;
+
   // The five score keys — structure, relevance, clarity, evidence and
   // impact — are written out inside INTERVIEWER below, both in the line
   // the model must end on and in the anchors that say what each number
@@ -328,11 +676,40 @@ const Coach = (() => {
   // other degrades quietly.
   const SCORE_MARKER = "[[SCORES]]";
 
+  /** Which model this deployment is talking to. */
+  function model(env) {
+    return env.COACH_MODEL || DEFAULT_MODEL;
+  }
+
+  /**
+   * The most this turn could cost, in USD, given what is being sent.
+   *
+   * Measured on the trimmed messages rather than the raw ones so the
+   * number matches the request that will actually go out — trim drops
+   * everything past MAX_TURNS and truncates at MAX_CHARS, and a hold
+   * priced on text that gets discarded is a hold on nothing.
+   */
+  function estimate(env, question, messages) {
+    const chars = trim(messages).reduce((total, m) => total + m.content.length, 0) + question.length;
+    return Pricing.ceiling(model(env), {
+      chars,
+      systemTokens: SYSTEM_TOKENS,
+      maxTokens: MAX_TOKENS,
+    });
+  }
+
   /**
    * Run one interviewer turn. Resolves to a Response carrying the
    * simplified event stream described above.
+   *
+   * `onSpend(usd)` is called once, after the last token, with what the
+   * turn actually cost. It is optional — the owner's turns are not
+   * metered — and it is called from inside the stream rather than here
+   * because the cost of a turn is not known until the turn is over.
+   * Callers who need the write to outlive the response must hand it to
+   * ctx.waitUntil themselves; see the /api/coach route.
    */
-  async function converse(env, question, messages) {
+  async function converse(env, question, messages, onSpend) {
     if (!env.ANTHROPIC_API_KEY) {
       return Responses.fail("AI practice isn't configured on this deployment.", 503);
     }
@@ -345,7 +722,7 @@ const Coach = (() => {
         "x-api-key": env.ANTHROPIC_API_KEY,
       },
       body: JSON.stringify({
-        model: env.COACH_MODEL || DEFAULT_MODEL,
+        model: model(env),
         max_tokens: MAX_TOKENS,
         stream: true,
         system: systemPrompt(question),
@@ -358,7 +735,7 @@ const Coach = (() => {
       return Responses.fail("The interviewer is unavailable right now.", 502);
     }
 
-    return new Response(upstream.body.pipeThrough(simplify()), {
+    return new Response(upstream.body.pipeThrough(simplify(env, onSpend)), {
       headers: {
         "content-type": "text/event-stream; charset=utf-8",
         "cache-control": "no-cache",
@@ -510,10 +887,16 @@ const Coach = (() => {
    * isn't a text delta is dropped here, so the client's reader is a
    * dozen lines instead of a parser.
    */
-  function simplify() {
+  function simplify(env, onSpend) {
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
     let buffer = "";
+
+    // What this turn consumed, filled in as the stream reveals it.
+    // Anthropic splits the four numbers across two events: the input
+    // classes are known at message_start, the output total only at
+    // message_delta once the model has stopped.
+    const usage = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
 
     return new TransformStream({
       transform(chunk, controller) {
@@ -525,6 +908,7 @@ const Coach = (() => {
 
         for (const line of lines) {
           report(line);
+          meter(line);
           const text = textOf(line);
           if (text) {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
@@ -534,8 +918,42 @@ const Coach = (() => {
 
       flush(controller) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+        if (onSpend) {
+          onSpend(Pricing.costOf(model(env), usage), usage);
+        }
       },
     });
+
+    /**
+     * Keep a running count of the four billable token classes.
+     *
+     * Tolerant of missing fields by design. A usage shape that gains a
+     * field should cost slightly less than it truly does for one deploy,
+     * rather than throwing inside a transform and taking the candidate's
+     * half-finished answer down with it. The invariant that matters is
+     * that the stream survives; the money is reconciled against a
+     * provisional charge that was already the worst case.
+     */
+    function meter(line) {
+      if (!line.startsWith("data:")) return;
+      try {
+        const event = JSON.parse(line.slice(5));
+        const counts = (event.message && event.message.usage) || event.usage;
+        if (!counts) return;
+
+        usage.input += counts.input_tokens || 0;
+        usage.cacheWrite += counts.cache_creation_input_tokens || 0;
+        usage.cacheRead += counts.cache_read_input_tokens || 0;
+
+        // Cumulative, not incremental: message_delta reports the total so
+        // far, so this is the last word rather than a running sum.
+        if (counts.output_tokens) {
+          usage.output = counts.output_tokens;
+        }
+      } catch (err) {
+        // Not our business — the stream is still the stream.
+      }
+    }
 
     /**
      * Note whether the cache actually engaged, once per turn.
@@ -622,11 +1040,126 @@ const Coach = (() => {
     return folded;
   }
 
-  return { converse };
+  return { converse, estimate };
 })();
 
 /* ---------------------------------------------------------- */
-/* 6. HEALTH                                                   */
+/* 8. ADMIN                                                    */
+/* ---------------------------------------------------------- */
+
+/**
+ * Minting and inspecting invite codes.
+ *
+ * Three operations, no UI, because the population being administered is
+ * a handful of beta testers and a page to manage them would be more code
+ * than the thing it manages. curl and `wrangler d1 execute` both reach
+ * the same rows; see README for the exact commands.
+ *
+ * Guarded by ADMIN_TOKEN, and unreachable — 404, not 401 — when that
+ * secret is unset. An admin route that announces itself on a deployment
+ * with no token configured is an invitation; one that does not exist
+ * yet is just a 404 among all the other 404s.
+ */
+const Admin = (() => {
+  const DEFAULT_CAP_USD = 0.5;
+  const MAX_CAP_USD = 100;
+
+  function authorised(env, request) {
+    const expected = env.ADMIN_TOKEN || "";
+    const supplied = request.headers.get("x-admin-token") || "";
+    if (!expected || !supplied) {
+      return false;
+    }
+    return Credentials.constantTimeEqual(supplied, expected);
+  }
+
+  /** Every code, dearest first — the ones worth looking at are the ones being spent. */
+  async function list(db) {
+    const result = await db
+      .prepare(
+        `SELECT code, label, cap_usd, spent_usd, turns, active, created_at, last_used_at
+           FROM invite_codes ORDER BY spent_usd DESC, created_at DESC`
+      )
+      .all();
+
+    return (result.results || []).map(toCode);
+  }
+
+  /**
+   * Mint one. The code is returned in full exactly once, here — it is
+   * stored in plain text, so it can be read back later too, which is the
+   * right trade for a $0.50 budget token that gets pasted into a chat.
+   */
+  async function create(db, body) {
+    const code = Access.mint();
+    const cap = clampCap(body.cap_usd);
+    const label = String(body.label || "").slice(0, 80);
+
+    await db
+      .prepare(
+        `INSERT INTO invite_codes (code, label, cap_usd, created_at)
+         VALUES (?, ?, ?, ?)`
+      )
+      .bind(code, label, cap, new Date().toISOString())
+      .run();
+
+    return toCode(await Access.find(db, code));
+  }
+
+  /**
+   * Change a cap or switch a code off.
+   *
+   * Raising the cap on a code that already hit it revives it, which is
+   * the point: "usage limit reached" should be a conversation, not a
+   * dead end, and the fix is one PATCH rather than a new code and a
+   * re-onboarding.
+   */
+  async function update(db, code, body) {
+    const existing = await Access.find(db, code);
+    if (!existing) {
+      return null;
+    }
+
+    const cap = body.cap_usd === undefined ? existing.cap_usd : clampCap(body.cap_usd);
+    const active =
+      body.active === undefined ? existing.active : body.active ? 1 : 0;
+
+    await db
+      .prepare("UPDATE invite_codes SET cap_usd = ?, active = ? WHERE code = ?")
+      .bind(cap, active, existing.code)
+      .run();
+
+    return toCode(await Access.find(db, existing.code));
+  }
+
+  /** Bounded because a typo in a cap is a typo in a credit limit. */
+  function clampCap(value) {
+    const cap = Number(value);
+    if (!Number.isFinite(cap) || cap <= 0) {
+      return DEFAULT_CAP_USD;
+    }
+    return Math.min(cap, MAX_CAP_USD);
+  }
+
+  function toCode(row) {
+    return {
+      code: row.code,
+      label: row.label,
+      cap_usd: Access.round(row.cap_usd),
+      spent_usd: Access.round(row.spent_usd),
+      remaining_usd: Access.round(Math.max(0, row.cap_usd - row.spent_usd)),
+      turns: row.turns,
+      active: row.active === 1,
+      created_at: row.created_at,
+      last_used_at: row.last_used_at,
+    };
+  }
+
+  return { authorised, list, create, update };
+})();
+
+/* ---------------------------------------------------------- */
+/* 9. HEALTH                                                   */
 /* ---------------------------------------------------------- */
 
 /**
@@ -646,7 +1179,7 @@ const Coach = (() => {
  */
 const Health = (() => {
   /** Tables the Worker cannot function without. */
-  const REQUIRED_TABLES = ["detectives", "sessions", "case_log"];
+  const REQUIRED_TABLES = ["detectives", "sessions", "case_log", "invite_codes"];
 
   async function read(env) {
     const report = {
@@ -655,6 +1188,12 @@ const Health = (() => {
       schema_ready: false,
       missing_tables: REQUIRED_TABLES.slice(),
       anthropic_key_set: Boolean(env.ANTHROPIC_API_KEY),
+      // Presence, never value. Both of these being false is the signal
+      // that the access tiers are configured but unusable: nobody can
+      // sign in as the owner and nobody can mint an invite code, so the
+      // deployment has manual scoring and nothing else.
+      owner_passphrase_set: Boolean(env.OWNER_PASSPHRASE),
+      admin_token_set: Boolean(env.ADMIN_TOKEN),
     };
 
     if (!report.db_bound) {
@@ -664,7 +1203,7 @@ const Health = (() => {
 
     try {
       const found = await env.DB.prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?)"
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?)"
       )
         .bind(...REQUIRED_TABLES)
         .all();
@@ -675,7 +1214,13 @@ const Health = (() => {
       report.ok = report.schema_ready;
 
       if (!report.schema_ready) {
-        report.hint = "Database is empty. Run: npm run db:init:remote";
+        // A brand new database is missing everything; one that predates
+        // invite codes is missing exactly one table. Same symptom, two
+        // different commands, so the hint says which.
+        report.hint =
+          report.missing_tables.length === REQUIRED_TABLES.length
+            ? "Database is empty. Run: npm run db:init:remote"
+            : "Database predates a schema change. Run: npm run db:migrate:remote";
       }
     } catch (err) {
       report.hint = `Database unreachable: ${err.message}`;
@@ -688,10 +1233,10 @@ const Health = (() => {
 })();
 
 /* ---------------------------------------------------------- */
-/* 7. ROUTER                                                   */
+/* 10. ROUTER                                                  */
 /* ---------------------------------------------------------- */
 
-async function handleApi(request, env, path) {
+async function handleApi(request, env, ctx, path) {
   // Deliberately unauthenticated and deliberately first: every other
   // route needs the DB, so when the DB is the thing that's broken there
   // is nowhere else to ask. Booleans only — this says whether the
@@ -700,15 +1245,26 @@ async function handleApi(request, env, path) {
     return Responses.json(await Health.read(env));
   }
 
+  // Admin sits ahead of the session check because it is not a detective
+  // doing this — it is whoever holds ADMIN_TOKEN, from a terminal, with
+  // no account and no interest in one.
+  if (path.startsWith("/api/admin/")) {
+    return handleAdmin(request, env, path);
+  }
+
   if (path === "/api/session" && request.method === "POST") {
     const body = await readJson(request);
-    const session = await Detectives.openSession(env.DB, body.username, body.password);
-    if (!session) {
-      return Responses.fail("Those credentials didn't check out.", 401);
+    // `code` is the field the login form fills; `password` is accepted as
+    // an alias so an older cached copy of the page still signs in.
+    const secret = body.code || body.password || "";
+    const session = await Detectives.openSession(env.DB, env, body.username, secret);
+    if (session.error) {
+      return Responses.fail(session.error, 401);
     }
     return Responses.json({
       token: session.token,
       username: session.username,
+      access: await Access.summary(env.DB, env, session),
       log: await CaseLog.read(env.DB, session.id),
     });
   }
@@ -717,6 +1273,12 @@ async function handleApi(request, env, path) {
   const detective = await Detectives.fromRequest(env.DB, request);
   if (!detective) {
     return Responses.fail("Not signed in.", 401);
+  }
+
+  // Lets a long-lived tab notice a cap being hit, or raised, without a
+  // sign-out and back in.
+  if (path === "/api/access" && request.method === "GET") {
+    return Responses.json({ access: await Access.summary(env.DB, env, detective) });
   }
 
   if (path === "/api/log" && request.method === "GET") {
@@ -734,8 +1296,12 @@ async function handleApi(request, env, path) {
     return Responses.json({ log: [] });
   }
 
-  // Sitting behind the session check above is deliberate: this is the
-  // one route that spends money on every call, so it costs a codename.
+  // The only route that spends money, and the only one that is tiered.
+  //
+  // The order below is the whole feature: decide, charge, then call.
+  // Anything that reaches api.anthropic.com before the charge lands is a
+  // request that got billed without being authorised, and the way to
+  // guarantee that never happens is to never write it in that order.
   if (path === "/api/coach" && request.method === "POST") {
     const body = await readJson(request);
     const question = String(body.question || "").slice(0, 500);
@@ -743,7 +1309,87 @@ async function handleApi(request, env, path) {
     if (!question || messages.length === 0) {
       return Responses.fail("No question to work.", 400);
     }
-    return Coach.converse(env, question, messages);
+
+    const access = await Access.summary(env.DB, env, detective);
+
+    if (access.tier === "free") {
+      return Responses.fail(
+        "AI coaching needs an invite code. Manual scoring and Send to Claude are open to everyone — " +
+          "pick Send to Claude to practise this case at no cost.",
+        403
+      );
+    }
+
+    // The owner's turns are unmetered, so there is nothing to charge and
+    // nothing to settle.
+    if (access.tier === "owner") {
+      return Coach.converse(env, question, messages, null);
+    }
+
+    // Charge the worst case first and refund the difference afterwards.
+    // Doing it the intuitive way round — call, then bill what it cost —
+    // means the cap is only ever checked against turns that have already
+    // finished, and a burst of simultaneous requests all pass a check
+    // that none of them have yet paid for.
+    const held = Coach.estimate(env, question, messages);
+    if (!(await Access.charge(env.DB, access.code, held))) {
+      return Responses.fail(
+        `Usage limit reached — this invite code has spent its $${access.cap.toFixed(2)} of AI coaching. ` +
+          "Manual scoring and Send to Claude still work; ask Kheera to raise the cap to carry on.",
+        402
+      );
+    }
+
+    let response;
+    try {
+      response = await Coach.converse(env, question, messages, (spent) => {
+        // Fired from inside the stream, after the response object has
+        // already been returned. waitUntil is what keeps the invocation
+        // alive long enough for the write to land.
+        ctx.waitUntil(Access.settle(env.DB, access.code, held, spent));
+      });
+    } catch (err) {
+      await Access.refund(env.DB, access.code, held);
+      throw err;
+    }
+
+    // A 502 or 503 from Coach never reaches the stream, so it never
+    // reaches the settle callback either. Without this the code would be
+    // billed a full turn's ceiling for an outage it had no part in.
+    if (!response.ok) {
+      await Access.refund(env.DB, access.code, held);
+    }
+
+    return response;
+  }
+
+  return Responses.fail("No such case file.", 404);
+}
+
+/**
+ * The invite-code admin surface. See the Admin module for why this is
+ * 404 rather than 401 when ADMIN_TOKEN is unset.
+ */
+async function handleAdmin(request, env, path) {
+  if (!Admin.authorised(env, request)) {
+    return Responses.fail("No such case file.", 404);
+  }
+
+  if (path === "/api/admin/codes" && request.method === "GET") {
+    return Responses.json({ codes: await Admin.list(env.DB) });
+  }
+
+  if (path === "/api/admin/codes" && request.method === "POST") {
+    return Responses.json({ code: await Admin.create(env.DB, await readJson(request)) }, 201);
+  }
+
+  if (path.startsWith("/api/admin/codes/") && request.method === "PATCH") {
+    const code = decodeURIComponent(path.slice("/api/admin/codes/".length));
+    const updated = await Admin.update(env.DB, code, await readJson(request));
+    if (!updated) {
+      return Responses.fail("No such invite code.", 404);
+    }
+    return Responses.json({ code: updated });
   }
 
   return Responses.fail("No such case file.", 404);
@@ -758,7 +1404,10 @@ async function readJson(request) {
 }
 
 export default {
-  async fetch(request, env) {
+  // ctx is here for one reason: /api/coach settles its bill after the
+  // response has already started streaming, and waitUntil is the only
+  // thing that keeps the invocation alive long enough for that write.
+  async fetch(request, env, ctx) {
     const path = new URL(request.url).pathname;
 
     if (!path.startsWith(API_PREFIX)) {
@@ -766,7 +1415,7 @@ export default {
     }
 
     try {
-      return await handleApi(request, env, path);
+      return await handleApi(request, env, ctx, path);
     } catch (err) {
       // Log the route and the actual message, not just the object. The
       // opaque version of this line cost an evening: `wrangler tail`

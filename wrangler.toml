@@ -56,3 +56,27 @@ database_id = "de7dfe1a-f7ac-4273-8607-e5691b6d6389"
 #
 # [vars]
 # COACH_MODEL = "claude-haiku-4-5-20251001"
+#
+# A model set here must also appear in the Pricing table in
+# worker/index.js. One that doesn't is billed at the most expensive
+# known rate, which keeps caps honest but will fire them early.
+
+# Two more secrets guard the two AI modes. Like the API key, they are
+# absent from this file because it is committed:
+#
+#   npx wrangler secret put OWNER_PASSPHRASE   # unlocks the "kheera" account
+#   npx wrangler secret put ADMIN_TOKEN        # unlocks /api/admin/codes
+#
+# and locally in .dev.vars alongside the key.
+#
+# Both fail closed. Without OWNER_PASSPHRASE the codename "kheera" cannot
+# be signed in as at all — better an owner locked out than a codename
+# anyone can type for unlimited API access. Without ADMIN_TOKEN the admin
+# routes answer 404, so a deployment that forgot to set it does not
+# quietly expose invite-code minting to the internet.
+#
+# OWNER_USERNAME is an optional plain var if the owner codename should be
+# something other than "kheera":
+#
+# [vars]
+# OWNER_USERNAME = "kheera"

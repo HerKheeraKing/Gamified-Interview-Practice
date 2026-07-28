@@ -543,6 +543,7 @@ const Practice = (() => {
     refreshComposer();
     document.getElementById("handoff-status").textContent = "";
     document.querySelectorAll(".practice-mode").forEach((b) => b.classList.remove("active"));
+    markModes();
   }
 
   /* ---- mode switching ---- */
@@ -566,7 +567,9 @@ const Practice = (() => {
       document.getElementById(id).hidden = name !== mode;
     });
 
-    document.getElementById("practice-composer").hidden = mode === "handoff";
+    // The composer's visibility is decided once, further down, where the
+    // access check has already run — two places setting it would mean
+    // whichever ran last silently won.
     document.getElementById("practice-panel").hidden = false;
     document.getElementById("practice-input").placeholder =
       mode === "voice" ? "Or type a quick question…" : "Type your answer and hit enter";
@@ -582,12 +585,19 @@ const Practice = (() => {
     closeMicMenu();
     listMics();
 
+    const blocked = mode === "handoff" ? "" : aiBlocked();
+
     // Voice mode opens the conversation immediately but not the
     // microphone — a typed aside is a valid first turn, and it shouldn't
     // have to trigger a permission prompt to be heard.
-    if (mode === "voice" && Voice.supported()) {
+    if (mode === "voice" && !blocked && Voice.supported()) {
       Voice.attach(question, voiceHandlers());
     }
+
+    // Without a way in, the composer is furniture that does nothing.
+    // Hiding it says "not here" more clearly than a box that accepts
+    // typing and then refuses to send it.
+    document.getElementById("practice-composer").hidden = mode === "handoff" || Boolean(blocked);
 
     note(openingNote());
 
@@ -599,27 +609,106 @@ const Practice = (() => {
     // "hint", not "assistant" — it's an instruction to the room, not a
     // turn in the conversation, so it centres instead of sitting in a
     // bubble on Claude's side.
-    if (mode === "text" && !document.getElementById("chat-log").hasChildNodes()) {
+    if (mode === "text" && !blocked && !document.getElementById("chat-log").hasChildNodes()) {
       say("hint", "Whenever you're ready — answer the question above and I'll score it.");
     }
   }
 
   /**
+   * Mark the two paid modes as locked when they are.
+   *
+   * A label, not an enforcement — the buttons stay clickable so the
+   * click can explain itself. A disabled button that says nothing when
+   * pressed is the worst version of this: it looks broken rather than
+   * gated, and nobody learns that an invite code is the thing to ask for.
+   */
+  function markModes() {
+    const locked = Boolean(aiBlocked());
+    document.querySelectorAll(".practice-mode").forEach((button) => {
+      const paid = button.dataset.mode !== "handoff";
+      button.classList.toggle("locked", paid && locked);
+    });
+  }
+
+  /**
+   * The one question the two AI modes have to answer before they do
+   * anything: may this person spend Anthropic credit?
+   *
+   * Returns "" when they may, or the sentence explaining why not. Every
+   * path that could reach /api/coach — the send button, Enter, the mic,
+   * the orb — consults this first, so a blocked detective never makes
+   * the request at all rather than making it and being refused. The
+   * Worker refuses it too; this is the half that keeps the refusal from
+   * costing a round trip and looking like a bug.
+   *
+   * Send to Claude is never blocked and is named in every message,
+   * because it does the same job for free and the message is the only
+   * place someone would learn that.
+   */
+  function aiBlocked() {
+    if (!Identity.isSignedIn()) {
+      return "Sign in with a codename first — AI practice runs through your Cloudflare Worker.";
+    }
+
+    const access = Identity.access();
+
+    if (access.tier === "free") {
+      return (
+        "AI coaching needs an invite code — add one from the Log In panel. " +
+        "Send to Claude is open to everyone: copy the prompt, practise in the Claude app, " +
+        "and score it here by hand."
+      );
+    }
+
+    if (!access.ai) {
+      return (
+        `Usage limit reached — this invite code has spent its $${money(access.cap)} of AI coaching. ` +
+        "Send to Claude and manual scoring are unaffected. Ask Kheera to raise the cap to carry on."
+      );
+    }
+
+    return "";
+  }
+
+  /**
    * What to warn about before the detective starts talking to a wall.
-   * Both AI modes cost money, so both need a codename; voice also
-   * needs browser support the site can't provide itself.
+   * Access first, because a browser with no speech engine is a smaller
+   * problem than not being allowed to use the mode at all.
    */
   function openingNote() {
     if (mode === "handoff") {
       return "";
     }
-    if (!Identity.isSignedIn()) {
-      return "Sign in with a codename first — AI practice runs through your Cloudflare Worker.";
+
+    const blocked = aiBlocked();
+    if (blocked) {
+      return blocked;
     }
+
     if (mode === "voice" && !Voice.supported()) {
       return "This browser has no speech engine. Chrome or Edge will do it; Text Practice works anywhere.";
     }
-    return "";
+
+    return budgetNote();
+  }
+
+  /**
+   * How much of the invite code's budget is left.
+   *
+   * Shown rather than hidden because the alternative is a session that
+   * stops mid-answer with no warning. The owner sees nothing here —
+   * there is no cap, so there is no number worth a line of the screen.
+   */
+  function budgetNote() {
+    const access = Identity.access();
+    if (access.tier !== "invited") {
+      return "";
+    }
+    return `Invite code: $${money(access.remaining)} of $${money(access.cap)} of AI coaching left.`;
+  }
+
+  function money(usd) {
+    return Number(usd || 0).toFixed(2);
   }
 
   function note(message) {
@@ -780,6 +869,14 @@ const Practice = (() => {
     const said = input.value.trim();
     if (!said || waiting) return;
 
+    // The last gate before a message becomes an API call. Everything
+    // above this line is free; everything below it is billable.
+    const blocked = aiBlocked();
+    if (blocked) {
+      note(blocked);
+      return;
+    }
+
     // Dictating and then sending shouldn't leave the microphone running
     // over the top of the reply, and the composer has to land on idle so
     // the empty box comes back rather than a tucked one.
@@ -830,12 +927,16 @@ const Practice = (() => {
         waiting = false;
         transcript.push({ role: "assistant", content: reply });
         scrollChat();
+        settleBudget();
       },
       error(message) {
         waiting = false;
         bubble.textContent = message;
         bubble.parentElement.classList.add("chat-error");
         scrollChat();
+        // A refusal is worth re-reading the budget over: the most likely
+        // reason for one is the cap this would have crossed.
+        settleBudget();
       },
     });
   }
@@ -880,9 +981,32 @@ const Practice = (() => {
       said(text) {
         setOrb(null, null, text);
       },
-      grades: ScoreModal.applyGrades,
+      grades(scores) {
+        ScoreModal.applyGrades(scores);
+        settleBudget();
+      },
       error: note,
     };
+  }
+
+  /**
+   * Re-read the budget after a turn has been paid for.
+   *
+   * The turn that exhausts a code is the one that has to say so — a
+   * cap discovered on the next click is a session that ends in a
+   * rejection instead of a warning. Cheap enough to do per turn: one
+   * indexed row, and only for accounts that have a cap at all.
+   */
+  function settleBudget() {
+    if (Identity.access().tier !== "invited") {
+      return;
+    }
+    Api.refreshAccess().then(() => {
+      markModes();
+      if (mode === "text" || mode === "voice") {
+        note(openingNote());
+      }
+    });
   }
 
   /**
@@ -896,7 +1020,10 @@ const Practice = (() => {
       return;
     }
 
-    if (!Identity.isSignedIn() || !Voice.supported()) {
+    // Opening the microphone is where Live Voice starts costing money,
+    // so the access check belongs here and not only at mode selection —
+    // a cap can be reached mid-session, between one turn and the next.
+    if (aiBlocked() || !Voice.supported()) {
       note(openingNote());
       return;
     }
@@ -1210,6 +1337,9 @@ const Login = (() => {
     document.getElementById("login-input").addEventListener("keydown", (e) => {
       if (e.key === "Enter") submit();
     });
+    document.getElementById("login-code").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submit();
+    });
     document.getElementById("login-modal-backdrop").addEventListener("click", (e) => {
       if (e.target.id === "login-modal-backdrop") close();
     });
@@ -1233,6 +1363,7 @@ const Login = (() => {
     setError("");
     const input = document.getElementById("login-input");
     input.value = "";
+    document.getElementById("login-code").value = "";
     document.getElementById("login-modal-backdrop").classList.add("open");
     input.focus();
   }
@@ -1244,6 +1375,9 @@ const Login = (() => {
   async function submit() {
     const button = document.getElementById("login-submit");
     const name = document.getElementById("login-input").value.trim();
+    // Blank is the normal case, not a missing answer: no code means the
+    // free tier, which is a complete way to use the site.
+    const code = document.getElementById("login-code").value.trim();
 
     if (!name) {
       setError("Every detective needs a name.");
@@ -1254,7 +1388,7 @@ const Login = (() => {
     button.textContent = "CHECKING…";
 
     try {
-      await Api.signIn(name);
+      await Api.signIn(name, code);
       close();
       renderBadge();
       // The sign-in response already carried the server log; a refresh
@@ -1279,7 +1413,23 @@ const Login = (() => {
     const name = Identity.username();
     badge.textContent = name || "Log In";
     badge.classList.toggle("signed-in", Boolean(name));
-    badge.title = name ? "Synced to Cloudflare — click to sign out" : "Sync your progress across devices";
+    badge.title = name
+      ? `Synced to Cloudflare · ${tierLabel()} — click to sign out`
+      : "Sync your progress across devices";
+  }
+
+  /** The tier, in the one place it's worth stating outside the case modal. */
+  function tierLabel() {
+    const access = Identity.access();
+    if (access.tier === "owner") {
+      return "AI practice unlimited";
+    }
+    if (access.tier === "invited") {
+      return access.ai
+        ? `AI practice $${Number(access.remaining).toFixed(2)} left`
+        : "AI practice — limit reached";
+    }
+    return "manual scoring & Send to Claude";
   }
 
   return { init, renderBadge };
@@ -1300,6 +1450,13 @@ function bootstrap() {
     if (changed) Render.all();
     // A refresh can drop an expired session, so the badge is re-read.
     Login.renderBadge();
+  });
+
+  // The stored tier is from whenever this device last signed in, and a
+  // cap can be raised or a code revoked in between. Re-reading it on load
+  // is what stops a tab left open overnight showing yesterday's answer.
+  Api.refreshAccess().then((access) => {
+    if (access) Login.renderBadge();
   });
 
   document.getElementById("case-grid").addEventListener("click", (e) => {
