@@ -540,6 +540,7 @@ const Practice = (() => {
     waiting = false;
 
     document.getElementById("practice-panel").hidden = true;
+    document.getElementById("practice-panel").classList.remove("notice-only");
     document.getElementById("chat-log").innerHTML = "";
     document.getElementById("practice-input").value = "";
     settleTyping();
@@ -601,6 +602,13 @@ const Practice = (() => {
     // Hiding it says "not here" more clearly than a box that accepts
     // typing and then refuses to send it.
     document.getElementById("practice-composer").hidden = mode === "handoff" || Boolean(blocked);
+
+    // Blocked, the panel holds one notice and an empty stage, so it
+    // shrinks to the notice and leaves it stranded against the top edge.
+    // The panel can't work this out for itself — an empty chat log and a
+    // chat log about to be filled look identical to CSS — so the layer
+    // that knows why the stage is empty says so.
+    document.getElementById("practice-panel").classList.toggle("notice-only", Boolean(blocked));
 
     showOpeningNote();
 

@@ -1243,7 +1243,7 @@ main {
      — the spend cap row on Generate, the note under the code input on
      Revoke — and both tabs end up with exactly the same breathing room
      without either field knowing what follows it. */
-  margin: 26px auto 0;
+  margin: 40px auto 0;
   background: linear-gradient(90deg, rgba(140, 232, 176, 0.16), rgba(182, 245, 205, 0.26));
   border-color: rgba(182, 245, 205, 0.45);
   color: #dcfbe8;
@@ -1686,6 +1686,32 @@ main {
 }
 
 /* ---------------- Text practice ---------------- */
+
+/* The panel when a notice is all there is to show.
+ *
+ * A blocked mode leaves the panel holding one message and an empty
+ * stage, so it collapses to the height of the message and pins it to
+ * the top edge with the panel's padding — which reads as a box that
+ * failed to load its contents rather than a box whose contents are the
+ * message. The floor gives it the proportions of a populated panel and
+ * the centring puts the one thing in it where the eye goes first.
+ *
+ * A class rather than a CSS-only rule because CSS cannot tell an empty
+ * chat log from one that is about to fill; Practice sets it when it
+ * decides the mode is blocked. */
+.practice-panel.notice-only {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 168px;
+}
+
+/* The 20px below the notice separates it from a stage. Centred with
+   nothing under it, that margin is counted into the block being
+   centred, and the notice sits half of it too high. */
+.practice-panel.notice-only .practice-note {
+  margin-bottom: 0;
+}
 
 .chat-log {
   display: flex;
