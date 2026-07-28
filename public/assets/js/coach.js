@@ -335,24 +335,69 @@ const Speaker = (() => {
    * reply" and "the best available voice at the start of one", and
    * those need different scopes.
    *
-   * The ranking is by character, not by where the voice runs. The
-   * preferred voice is remote — synthesised on a server and fetched per
-   * utterance — which is a real cost: it needs the network, and two
+   * What's wanted is a British voice. That is a fact about `lang`, so
+   * `lang` is what decides, and names only break the tie among voices
+   * already known to be British.
+   *
+   * Ranking by name alone doesn't survive leaving the browser it was
+   * written on. The list used to open with Google UK English Female and
+   * carry Microsoft Aria a couple of places down as a decent fallback —
+   * fine in Chrome, where the first one exists. Edge has no Google
+   * voices at all, so the fallback won, and Aria is American. Edge was
+   * offering Sonia, Libby and Ryan, all British, all invisible to a
+   * ranking that was only looking for four particular names. Every
+   * engine spells its voices differently and none of them are the ones
+   * this list was written against; `en-GB` means the same thing
+   * everywhere.
+   *
+   * The preferred voices are remote — synthesised on a server, fetched
+   * per utterance — which is a real cost: it needs the network, and two
    * utterances are two separate fetches that need not come back at the
-   * same loudness. That cost is accepted deliberately, because this
-   * voice is the one the site is meant to sound like. Consistency
-   * within a reply is bought by pinning the choice here and by handing
+   * same loudness. That cost is accepted deliberately, because these
+   * are the voices the site is meant to sound like. Consistency within
+   * a reply is bought by pinning the choice a layer up and by handing
    * the synthesiser as few utterances as possible, not by picking a
    * voice nobody chose.
    */
   function voice() {
     if (!engine) return null;
 
-    const english = engine.getVoices().filter((v) => v.lang && v.lang.startsWith("en"));
+    const english = engine.getVoices().filter((v) => isLang(v, "en"));
     if (english.length === 0) return null;
 
-    const liked = ["Google UK English Female", "Samantha", "Microsoft Aria", "Microsoft Zira"];
-    return announce(byName(english, liked) || english[0] || null);
+    // British if this machine has one; any English voice if it doesn't,
+    // because refusing to speak is not the better outcome.
+    const british = english.filter((v) => isLang(v, "en-gb"));
+    const pool = british.length > 0 ? british : english;
+
+    return announce(byName(pool, LIKED) || byName(pool, NATURAL) || pool[0], english);
+  }
+
+  /**
+   * Voices worth having, by the part of the name that identifies them.
+   *
+   * All British, because this only ever ranks within a British pool
+   * when there is one — an American name here would be dead weight at
+   * best and, as Microsoft Aria proved, a trap at worst. Chrome's
+   * first, then Edge's, then the ones macOS and Windows ship locally.
+   */
+  const LIKED = [
+    "Google UK English Female",
+    "Sonia",
+    "Libby",
+    "Hazel",
+    "Kate",
+    "Serena",
+    "Stephanie",
+    "Daniel",
+  ];
+
+  // Failing a name we know, take a voice the engine calls "Natural" —
+  // Edge and Windows both use that word for their better ones.
+  const NATURAL = ["Natural"];
+
+  function isLang(voice, prefix) {
+    return Boolean(voice.lang) && voice.lang.toLowerCase().startsWith(prefix);
   }
 
   /**
@@ -366,13 +411,20 @@ const Speaker = (() => {
    * it came off the network — because those are what the question is
    * usually really about.
    */
-  function announce(picked) {
+  function announce(picked, pool) {
     const name = picked ? picked.name : "the system default";
-    if (name !== announced) {
-      announced = name;
-      const where = picked && !picked.localService ? "network" : "on this device";
-      console.info(`Live Voice is speaking with: ${name} (${where}).`);
-    }
+    if (name === announced) return picked;
+
+    announced = name;
+    const where = picked && !picked.localService ? "network" : "on this device";
+    console.info(`Live Voice is speaking with: ${name} (${where}).`);
+    // The list it was chosen from, alongside the choice. A voice that
+    // sounds wrong is nearly always a list that doesn't contain what
+    // was expected, and the two are only worth reading together.
+    console.info(
+      "Live Voice — English voices this browser offers:",
+      pool.map((v) => `${v.name} [${v.lang}]`)
+    );
     return picked;
   }
 
