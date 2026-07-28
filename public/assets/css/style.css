@@ -1237,7 +1237,13 @@ main {
   width: auto;
   min-width: 200px;
   max-width: none;
-  margin: 4px auto 0;
+  /* The gap above the button lives here and nowhere else. Adjacent
+     vertical margins collapse to the larger of the two, so this single
+     value beats whatever bottom margin the field above happens to have
+     — the spend cap row on Generate, the note under the code input on
+     Revoke — and both tabs end up with exactly the same breathing room
+     without either field knowing what follows it. */
+  margin: 26px auto 0;
   background: linear-gradient(90deg, rgba(140, 232, 176, 0.16), rgba(182, 245, 205, 0.26));
   border-color: rgba(182, 245, 205, 0.45);
   color: #dcfbe8;
