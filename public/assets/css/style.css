@@ -1176,9 +1176,41 @@ main {
 .practice-panel {
   margin-top: 14px;
   padding: 20px 18px;
-  border: 1px solid rgba(165, 230, 255, 0.16);
+  border: 1px solid rgba(165, 230, 255, 0.26);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.025);
+
+  /* The same two-layer glass recipe as .modal and .rank-card, mixed one
+     step lighter. The panel sits *on* the modal's own glass, so matching
+     its base would make the two surfaces read as one; lifting the base
+     and the white stops is what separates them.
+
+     No backdrop-filter here on purpose. The parent .modal already blurs
+     at 30px, and a nested backdrop-filter re-samples that composited
+     result — it costs a second full-surface blur and, in WebKit, tends
+     to band along the rounded corners. The layered translucent fill
+     gets the same read for free.
+
+     The white stops are the lever, not the base tint — white over a
+     near-black surface moves luminance several times faster per unit of
+     alpha than a plum tint does. Reusing the modal's own 0.07/0.02 stops
+     put the panel ~75% brighter than its container: a grey slab, not a
+     zone. Held to these values it lands +24% at the centre and +37/39%
+     at the two gradient corners, which reads as a lit surface sitting on
+     the modal rather than a second modal inside it. */
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.026) 0%, rgba(255,255,255,0.012) 45%, rgba(125,211,252,0.038) 100%),
+    rgba(46, 44, 74, 0.14);
+
+  /* Focus comes from the glow, not from a harder edge. The border stays
+     below the modal's own 0.28 so the panel never out-outlines its
+     container; the diffuse 26px cyan bloom is what actually pulls the
+     eye, and being diffuse it can't compete with the tight 10px glow on
+     a selected score dot underneath. */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -14px 28px rgba(125, 211, 252, 0.05),
+    0 0 26px rgba(125, 211, 252, 0.14),
+    0 4px 18px rgba(0, 0, 0, 0.22);
 }
 
 .practice-note {
