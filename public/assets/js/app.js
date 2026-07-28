@@ -1105,6 +1105,15 @@ const Practice = (() => {
    * clicked and the history survives closing the mic again.
    */
   function toggleVoice() {
+    // First thing, before any branch — this is a click handler, and on
+    // WebKit that makes it the only place on the whole Live Voice path
+    // with the standing to authorise speech. Everything Claude says
+    // arrives later, from a network stream, with no gesture anywhere
+    // behind it; if the permission isn't taken here it is never
+    // available at all. Cheap, silent, and idempotent, so it costs
+    // nothing to do it on the closing tap too.
+    Speaker.unlock();
+
     if (live) {
       endVoice();
       return;

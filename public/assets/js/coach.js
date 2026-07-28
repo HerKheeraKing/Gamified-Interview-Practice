@@ -231,12 +231,54 @@ const Speaker = (() => {
   // enough not to be heard as a delay. See ready().
   const LIST_WAIT_MS = 400;
 
+  // How often the guard checks whether the engine is actually speaking,
+  // and how long an utterance may sit unstarted before it is written off.
+  // See the guard in say().
+  const GUARD_MS = 250;
+  const START_GRACE_MS = 1500;
+
+  // Whether speak() has been reached from a user gesture yet. See unlock().
+  let unlocked = false;
+
   // The last voice reported to the console, so the report happens when
   // the answer changes rather than on every reply. See announce().
   let announced = null;
 
   function available() {
     return Boolean(engine);
+  }
+
+  /**
+   * Buy the right to speak later, by speaking now.
+   *
+   * WebKit will only honour speechSynthesis.speak() if it can trace the
+   * call back to a user gesture, and it enforces that by doing nothing
+   * at all when it can't: no sound, no error, no `start`, no `end`.
+   * Every utterance in this module arrives at the wrong end of a network
+   * stream and two promise hops, so on iOS not one of them had a gesture
+   * behind it and none of them ever played. That is the whole bug, and
+   * it is not a Chrome-vs-Safari matter — every browser on iPad is
+   * WebKit underneath, so "it works in Chrome on my laptop" says nothing
+   * about the iPad running the same brand.
+   *
+   * One accepted utterance inside a gesture lifts the restriction for
+   * the rest of the page, so this speaks a silent one from the tap that
+   * opens the mic. It has to be real text: an empty string is discarded
+   * by some engines without ever counting as the call that unlocked
+   * anything. `volume = 0` is what keeps it from being heard.
+   *
+   * Harmless everywhere else — desktop engines simply speak nothing.
+   */
+  function unlock() {
+    if (!engine || unlocked) return;
+    unlocked = true;
+    try {
+      const primer = new SpeechSynthesisUtterance(" ");
+      primer.volume = 0;
+      engine.speak(primer);
+    } catch (err) {
+      console.warn("Speech unlock failed:", err);
+    }
   }
 
   /**
@@ -274,11 +316,30 @@ const Speaker = (() => {
       // again" is what let a reply that opened on the default finish on
       // a named voice.
       utterance.voice = handlers.voice === undefined ? voice() : handlers.voice;
+      // Stated rather than inherited. WebKit picks its own voice when an
+      // utterance has a null voice and no language to go on, and what it
+      // picks follows the device locale — an iPad set to Korean reading
+      // English coaching aloud in a Korean voice.
+      utterance.lang = (utterance.voice && utterance.voice.lang) || "en-GB";
       utterance.rate = RATE;
       utterance.pitch = PITCH;
       utterance.volume = VOLUME;
 
+      let started = false;
+      let done = false;
+
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearInterval(guard);
+        // Whatever the boundaries did or didn't say, the sentence is
+        // fully spoken now, so the caption ends up whole either way.
+        handlers.spoken(text);
+        resolve();
+      };
+
       utterance.onboundary = (event) => {
+        started = true;
         // Sentence boundaries repeat ground the word events already
         // cover, and would rewind the caption when they do.
         if (event.name && event.name !== "word") return;
@@ -286,17 +347,43 @@ const Speaker = (() => {
         handlers.spoken(text.slice(0, event.charIndex + length));
       };
 
-      const finish = () => {
-        // Whatever the boundaries did or didn't say, the sentence is
-        // fully spoken now, so the caption ends up whole either way.
-        handlers.spoken(text);
-        resolve();
-      };
-
+      utterance.onstart = () => { started = true; };
       utterance.onend = finish;
       // A failed utterance must still resolve, or the caller's queue
       // stalls forever waiting on a voice that never spoke.
       utterance.onerror = finish;
+
+      /**
+       * The queue cannot be left resting on `end` alone.
+       *
+       * WebKit skips `end` often enough that treating it as guaranteed
+       * is what turned one dropped utterance into a session that never
+       * spoke again: `speaking` stayed true, pump() returned early every
+       * time after, and the caption — which is only ever written from
+       * these same callbacks — stayed empty for the rest of the session.
+       * A silent first utterance is a bug; a permanently wedged queue is
+       * that bug made unrecoverable.
+       *
+       * So the engine is asked instead of waited on. Neither speaking
+       * nor pending means the utterance is over, whether or not anything
+       * said so. The grace period covers the gap between speak() being
+       * called and the engine admitting it has work — before that, only
+       * a real `start` or `boundary` counts as evidence it began.
+       */
+      const began = Date.now();
+      const guard = setInterval(() => {
+        if (done) return;
+        if (engine.speaking || engine.pending) {
+          started = true;
+          return;
+        }
+        if (started || Date.now() - began > START_GRACE_MS) finish();
+      }, GUARD_MS);
+
+      // Safari can leave the queue paused after a cancel() or a trip to
+      // the background, and a paused queue accepts utterances without
+      // ever playing them. Resuming an unpaused engine does nothing.
+      engine.resume();
       engine.speak(utterance);
     });
   }
@@ -473,7 +560,7 @@ const Speaker = (() => {
     });
   }
 
-  return { available, say, stop, voice, ready };
+  return { available, unlock, say, stop, voice, ready };
 })();
 
 /* ---------------------------------------------------------- */
