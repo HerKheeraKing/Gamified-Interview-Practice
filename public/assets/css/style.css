@@ -1124,6 +1124,70 @@ main {
   text-align: left;
 }
 
+/* Two operations sharing one credential. A segmented control rather than
+   two buttons side by side, because only one of them is ever armed and
+   the field between them belongs to whichever is selected. */
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.admin-tab {
+  flex: 1;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-faint);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.admin-tab:hover {
+  color: var(--text-muted);
+}
+
+.admin-tab.active {
+  background: rgba(125, 211, 252, 0.16);
+  color: var(--text-primary);
+}
+
+.admin-code-input {
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.admin-note {
+  margin: 0 2px 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* Revoking is the one action here that takes something away, so the
+   button says so. Not disabled-looking and not hidden behind a confirm
+   dialog — it is reversible in one PATCH and destroys no data. */
+.admin-danger {
+  background: rgba(242, 120, 154, 0.16);
+  border-color: rgba(242, 120, 154, 0.5);
+  color: var(--danger);
+}
+
+.admin-danger:hover {
+  background: rgba(242, 120, 154, 0.24);
+  border-color: var(--danger);
+}
+
 .admin-input {
   margin-bottom: 12px;
   font-size: 13px;

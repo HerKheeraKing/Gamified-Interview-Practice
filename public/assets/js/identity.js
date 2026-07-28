@@ -215,6 +215,39 @@ const Api = (() => {
     }
   }
 
+  /**
+   * Switch an invite code off. Resolves to { code, wasActive }.
+   *
+   * Takes effect on the next turn, not the next sign-in: the Worker
+   * re-reads the code on every `/api/coach` call, so a session already
+   * open loses AI coaching mid-conversation rather than keeping it until
+   * the tab is closed.
+   *
+   * Two 404s are possible here and they mean opposite things — a token
+   * that wasn't accepted, and a token that was accepted for a code that
+   * doesn't exist. The `reason` field is what separates them; a bad
+   * token never carries one, so it cannot be used to probe for codes.
+   */
+  async function revokeCode(adminToken, code) {
+    try {
+      const res = await send(
+        `/api/admin/codes/${encodeURIComponent(code)}`,
+        "PATCH",
+        { active: false },
+        { "x-admin-token": adminToken }
+      );
+      return { code: res.code, wasActive: res.was_active };
+    } catch (err) {
+      if (err.reason === "unknown_code") {
+        throw new Error("No invite code by that name. Check the spelling — nothing was changed.");
+      }
+      if (err.status === 404) {
+        throw new Error("That admin token wasn't accepted. Nothing was changed.");
+      }
+      throw err;
+    }
+  }
+
   async function send(path, method, body, extraHeaders) {
     const headers = { "content-type": "application/json", ...extraHeaders };
     const token = Identity.token();
@@ -232,10 +265,13 @@ const Api = (() => {
     if (!res.ok) {
       const err = new Error(data.error || `Request failed (${res.status})`);
       err.status = res.status;
+      // Present only where the server needed a caller to branch on
+      // something finer than the status code. Usually undefined.
+      err.reason = data.reason;
       throw err;
     }
     return data;
   }
 
-  return { signIn, refreshAccess, mintCode, pullLog, pushLog, clearLog };
+  return { signIn, refreshAccess, mintCode, revokeCode, pullLog, pushLog, clearLog };
 })();

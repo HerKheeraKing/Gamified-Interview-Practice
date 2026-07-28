@@ -45,8 +45,21 @@ const Responses = (() => {
     return new Response(JSON.stringify(body), { status, headers: HEADERS });
   }
 
-  function fail(message, status = 400) {
-    return json({ error: message }, status);
+  /**
+   * An error the client can show, and optionally one it can branch on.
+   *
+   * `reason` exists for the single case where two different failures
+   * legitimately share a status code and the caller has to tell them
+   * apart — see the admin routes, where a bad token and an unknown
+   * invite code are both 404 on purpose. Branching on the prose instead
+   * would make every error message load-bearing.
+   */
+  function fail(message, status = 400, reason) {
+    const body = { error: message };
+    if (reason) {
+      body.reason = reason;
+    }
+    return json(body, status);
   }
 
   return { json, fail };
@@ -1113,6 +1126,17 @@ const Admin = (() => {
    * the point: "usage limit reached" should be a conversation, not a
    * dead end, and the fix is one PATCH rather than a new code and a
    * re-onboarding.
+   *
+   * Revoking is `active: false`, and it is deliberately not a delete.
+   * `spent_usd` and `turns` survive, so what a code cost stays readable
+   * after it is switched off — and the accounts that used it keep their
+   * case files, their XP and their sync, losing only the two AI modes.
+   * A revoked code stops working immediately regardless of how much of
+   * its cap is unspent; `Access.summary` treats `active = 0` and a spent
+   * cap the same way.
+   *
+   * Returns { code, wasActive } so the caller can tell a revocation from
+   * a no-op, or null when there is no such code.
    */
   async function update(db, code, body) {
     const existing = await Access.find(db, code);
@@ -1129,7 +1153,10 @@ const Admin = (() => {
       .bind(cap, active, existing.code)
       .run();
 
-    return toCode(await Access.find(db, existing.code));
+    return {
+      code: toCode(await Access.find(db, existing.code)),
+      wasActive: existing.active === 1,
+    };
   }
 
   /** Bounded because a typo in a cap is a typo in a credit limit. */
@@ -1385,11 +1412,21 @@ async function handleAdmin(request, env, path) {
 
   if (path.startsWith("/api/admin/codes/") && request.method === "PATCH") {
     const code = decodeURIComponent(path.slice("/api/admin/codes/".length));
-    const updated = await Admin.update(env.DB, code, await readJson(request));
-    if (!updated) {
-      return Responses.fail("No such invite code.", 404);
+    const result = await Admin.update(env.DB, code, await readJson(request));
+
+    // Same 404 as a bad token, deliberately — but carrying a reason,
+    // which a bad token never gets. Anyone who can see this field has
+    // already proved they hold ADMIN_TOKEN, so telling them whether a
+    // code exists reveals nothing they couldn't read off the list route.
+    if (!result) {
+      return Responses.fail("No invite code by that name.", 404, "unknown_code");
     }
-    return Responses.json({ code: updated });
+
+    // `was_active` is what makes revoking honest on screen: switching off
+    // a code that was already off is a no-op, and reporting it as a fresh
+    // revocation would tell someone they had just cut off access that had
+    // been cut off for a week.
+    return Responses.json({ code: result.code, was_active: result.wasActive });
   }
 
   return Responses.fail("No such case file.", 404);

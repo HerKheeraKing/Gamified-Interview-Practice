@@ -226,18 +226,44 @@ Locally the same three values go in `.dev.vars` (gitignored) alongside
 
 Day to day, from the site itself: open the login modal and click
 **Generate beta code**. That reveals an alternate expanded state of the
-same modal — an admin token field, a spend cap, and a Generate button —
-and shows the minted code in place. It shares no field, no error line
-and no submit path with signing in, so nothing typed in one half can
-affect the other, and the panel resets itself every time the modal is
-opened or closed. The admin token is passed straight to the request and
-never stored: not in `localStorage`, not in a module variable.
+same modal, with two operations behind a segmented control:
 
-A wrong token shows a clear error and creates nothing. The Worker
-answers 404 rather than 401 for a bad token — an admin route that says
-"wrong password" has confirmed it exists — so `Api.mintCode` translates
-that one 404 into a sentence, since it is the one caller that was
-definitely aiming at the route.
+- **Generate** — a spend cap, and the minted code shown in place.
+- **Revoke** — a code to switch off, confirmed with what it had spent.
+
+They share the admin token field and nothing else. The panel as a whole
+shares no field, no error line and no submit path with signing in, so
+nothing typed in one half can affect the other, and it resets itself
+every time the modal is opened or closed. The admin token is passed
+straight to the request and never stored: not in `localStorage`, not in
+a module variable.
+
+### Revoking
+
+Revoking is `active: false` on the existing PATCH route — there is no
+separate delete. A revoked code stops working on the **next turn**,
+however much of its cap is unspent, because `Access.summary` re-reads it
+on every `/api/coach` call rather than trusting the session. It is not
+destructive and not a delete:
+
+- `spent_usd` and `turns` survive, so what a code cost stays readable
+  after it is switched off.
+- The accounts that used it keep their case files, XP and sync. They
+  drop to the free tier and lose only the two AI modes.
+- It is reversible in one PATCH (`active: true`, or just raise the cap).
+
+That reversibility is why the panel has no "are you sure" dialog —
+a confirm step would be guarding an outcome that costs one click to
+undo. Revoking a code that was already off reports itself as a no-op
+rather than a fresh revocation, so nobody is told they just cut access
+that had been cut for a week.
+
+**Two 404s that mean opposite things.** A bad admin token and an unknown
+invite code both answer 404 — the first deliberately, since an admin
+route that says "wrong password" has confirmed it exists. Only the
+second carries `"reason": "unknown_code"`, so the panel can say which
+went wrong without parsing prose, and a bad token still can't be used to
+probe for which codes exist.
 
 For scripting, the same three routes take an `x-admin-token` header.
 
@@ -263,6 +289,13 @@ curl -sX PATCH $BASE/api/admin/codes/CASE-7F3K-92QX-M4TB \
 curl -sX PATCH $BASE/api/admin/codes/CASE-7F3K-92QX-M4TB \
   -H "x-admin-token: $TOKEN" -H 'content-type: application/json' \
   -d '{"active":false}'
+# -> {"code":{...,"active":false},"was_active":true}
+#    was_active:false means it was already off and nothing changed
+
+# And back on again
+curl -sX PATCH $BASE/api/admin/codes/CASE-7F3K-92QX-M4TB \
+  -H "x-admin-token: $TOKEN" -H 'content-type: application/json' \
+  -d '{"active":true}'
 ```
 
 Or straight at the table, which is the same rows:
@@ -289,8 +322,10 @@ with known token counts, and asserts the behaviour rather than reading
 the code back: the owner passphrase is required and the codename can't be
 squatted, the free tier is refused without an upstream call, a code stops
 at its cap and the arithmetic matches a figure worked out by hand, a
-raised cap resumes the session, and a revoked code degrades to free
-without losing anyone's log. Offline, no API spend.
+raised cap resumes the session, a revoked code loses AI while it still
+has budget left and degrades to free without losing anyone's log, a
+second revoke reports itself as a no-op, and the two 404s stay
+distinguishable to an admin but not to a stranger. Offline, no API spend.
 
 ### The API key never reaches the browser
 

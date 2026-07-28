@@ -406,6 +406,18 @@
         </button>
 
         <div class="admin-panel" id="admin-panel" hidden>
+          <!-- Two operations, one credential. The token field is shared
+               and the row below it swaps, so the panel never shows a
+               field that the button underneath won't use. -->
+          <div class="admin-tabs" id="admin-tabs" role="tablist">
+            <button type="button" class="admin-tab active" data-op="mint" role="tab" aria-selected="true">
+              Generate
+            </button>
+            <button type="button" class="admin-tab" data-op="revoke" role="tab" aria-selected="false">
+              Revoke
+            </button>
+          </div>
+
           <input
             id="admin-token"
             class="login-input admin-input"
@@ -416,7 +428,7 @@
             placeholder="ADMIN TOKEN"
           />
 
-          <label class="admin-cap-row" for="admin-cap">
+          <label class="admin-cap-row" id="admin-mint-field" for="admin-cap">
             <span class="admin-cap-label">Spend cap</span>
             <span class="admin-cap-field">
               <span class="admin-cap-currency">$</span>
@@ -432,16 +444,34 @@
             </span>
           </label>
 
+          <div id="admin-revoke-field" hidden>
+            <input
+              id="admin-revoke-code"
+              class="login-input admin-input admin-code-input"
+              type="text"
+              maxlength="24"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="CASE-XXXX-XXXX-XXXX"
+            />
+            <p class="admin-note">
+              Stops working on the next turn, cap or no cap. Their case
+              files, XP and sync are untouched — only the two AI modes go.
+            </p>
+          </div>
+
           <button type="button" class="pill-btn pill-btn-primary admin-generate" id="admin-generate">
             GENERATE
           </button>
 
           <p class="login-error" id="admin-error"></p>
 
-          <!-- The code is shown, not just copied. A clipboard write that
-               silently failed would look identical to one that worked,
-               and this string cannot be regenerated — it is already a
-               row in D1 by the time it appears here. -->
+          <!-- Shown, not just copied. A clipboard write that silently
+               failed would look identical to one that worked, and a
+               minted code cannot be regenerated — it is already a row in
+               D1 by the time it appears here. The same block confirms a
+               revocation, because "what happened to which code" is the
+               same question in both cases. -->
           <div class="admin-result" id="admin-result" hidden>
             <p class="admin-result-label" id="admin-result-label"></p>
             <code class="admin-code" id="admin-code"></code>

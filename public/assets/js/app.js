@@ -1477,21 +1477,70 @@ const Login = (() => {
  * needed for.
  */
 const Minting = (() => {
+  // Which of the two operations the panel is currently pointed at.
+  // "mint" | "revoke" — they share the admin token field and nothing else.
+  let op = "mint";
+
   function init() {
     document.getElementById("admin-toggle").addEventListener("click", toggle);
-    document.getElementById("admin-generate").addEventListener("click", generate);
+    document.getElementById("admin-generate").addEventListener("click", run);
     document.getElementById("admin-copy").addEventListener("click", copy);
 
-    // Enter inside the panel mints; it must never fall through to the
-    // sign-in button sitting a few pixels above it.
-    ["admin-token", "admin-cap"].forEach((id) => {
+    document.getElementById("admin-tabs").addEventListener("click", (e) => {
+      const tab = e.target.closest(".admin-tab");
+      if (tab) choose(tab.dataset.op);
+    });
+
+    // Enter inside the panel runs the current operation; it must never
+    // fall through to the sign-in button sitting a few pixels above it.
+    ["admin-token", "admin-cap", "admin-revoke-code"].forEach((id) => {
       document.getElementById(id).addEventListener("keydown", (e) => {
         if (e.key !== "Enter") return;
         e.preventDefault();
         e.stopPropagation();
-        generate();
+        run();
       });
     });
+  }
+
+  /**
+   * Point the panel at one of the two operations.
+   *
+   * Switching clears the error and the result, because both belong to
+   * the operation that produced them — a "revoked" confirmation still on
+   * screen under a Generate button would be describing something that
+   * has nothing to do with the button. The admin token survives the
+   * switch; it is the one field both operations share.
+   */
+  function choose(next) {
+    if (next === op) {
+      return;
+    }
+    op = next;
+
+    document.querySelectorAll(".admin-tab").forEach((tab) => {
+      const on = tab.dataset.op === op;
+      tab.classList.toggle("active", on);
+      tab.setAttribute("aria-selected", String(on));
+    });
+
+    document.getElementById("admin-mint-field").hidden = op !== "mint";
+    document.getElementById("admin-revoke-field").hidden = op !== "revoke";
+
+    const button = document.getElementById("admin-generate");
+    button.textContent = op === "mint" ? "GENERATE" : "REVOKE";
+    button.classList.toggle("admin-danger", op === "revoke");
+
+    setError("");
+    document.getElementById("admin-result").hidden = true;
+
+    // Only when there is something to focus. `collapse` resets the tab
+    // back to Generate on the way out, and pulling focus into a field
+    // inside a panel that is being hidden would scroll the modal for no
+    // reason the reader can see.
+    if (!document.getElementById("admin-panel").hidden) {
+      document.getElementById(op === "mint" ? "admin-cap" : "admin-revoke-code").focus();
+    }
   }
 
   function toggle() {
@@ -1524,19 +1573,31 @@ const Minting = (() => {
     document.getElementById("admin-toggle").setAttribute("aria-expanded", "false");
     document.getElementById("admin-toggle").textContent = "Generate beta code";
     document.getElementById("admin-token").value = "";
+    document.getElementById("admin-revoke-code").value = "";
     document.getElementById("admin-result").hidden = true;
     setError("");
+    choose("mint");
+  }
+
+  /**
+   * Run whichever operation the panel is pointed at.
+   *
+   * One entry point for the button and for Enter, so there is no way to
+   * reach `revoke` from a panel that is showing `mint` — the operation
+   * is read from state at the moment of the call rather than baked into
+   * whichever listener happened to fire.
+   */
+  function run() {
+    return op === "mint" ? generate() : revoke();
   }
 
   async function generate() {
-    const button = document.getElementById("admin-generate");
-    const token = document.getElementById("admin-token").value.trim();
-    const cap = Number(document.getElementById("admin-cap").value);
-
+    const token = adminToken();
     if (!token) {
-      setError("The admin token is the whole check — nothing is minted without it.");
       return;
     }
+
+    const cap = Number(document.getElementById("admin-cap").value);
 
     // Checked here as well as in the Worker, which clamps it. The Worker
     // is the one that counts; this is so a typed "5oo" is a sentence on
@@ -1546,28 +1607,101 @@ const Minting = (() => {
       return;
     }
 
+    await attempt("MINTING…", async () => {
+      const minted = await Api.mintCode(token, cap);
+      show(
+        minted.code,
+        `New code — $${money(minted.cap_usd)} of AI coaching, shared by everyone who uses it.`
+      );
+    });
+  }
+
+  /**
+   * Switch a code off.
+   *
+   * No confirm() step. The action is reversible in one PATCH — raising
+   * the cap or setting active back on revives it — and nothing is
+   * destroyed: spend, turns and everyone's case files survive. A modal
+   * asking "are you sure" would be protecting against an outcome that
+   * costs one more click to undo.
+   */
+  async function revoke() {
+    const token = adminToken();
+    if (!token) {
+      return;
+    }
+
+    const code = document.getElementById("admin-revoke-code").value.trim();
+    if (!code) {
+      setError("Which code? Paste the one to switch off.");
+      return;
+    }
+
+    await attempt("REVOKING…", async () => {
+      const { code: revoked, wasActive } = await Api.revokeCode(token, code);
+
+      // Reporting the no-op honestly. Switching off a code that was
+      // already off changed nothing, and saying "revoked" would tell
+      // someone they had just cut access that had been cut for a week.
+      const spend = `It had spent $${money(revoked.spent_usd)} of $${money(revoked.cap_usd)} across ${revoked.turns} turn${revoked.turns === 1 ? "" : "s"}.`;
+
+      show(
+        revoked.code,
+        wasActive
+          ? `Revoked. AI coaching stops on the next turn. ${spend}`
+          : `Already revoked — nothing changed. ${spend}`
+      );
+      document.getElementById("admin-revoke-code").value = "";
+    });
+  }
+
+  /** The shared credential, or "" with the error already on screen. */
+  function adminToken() {
+    const token = document.getElementById("admin-token").value.trim();
+    if (!token) {
+      setError("The admin token is the whole check — nothing happens without it.");
+      return "";
+    }
     setError("");
+    return token;
+  }
+
+  /**
+   * The bits both operations do the same way: disable the button, run,
+   * and put the button back whatever happened. Worth factoring out
+   * precisely because the `finally` is the part that is easy to forget
+   * in the second copy, and forgetting it leaves the panel dead.
+   */
+  async function attempt(busyLabel, work) {
+    const button = document.getElementById("admin-generate");
+    const label = button.textContent;
+
     button.disabled = true;
-    button.textContent = "MINTING…";
+    button.textContent = busyLabel;
 
     try {
-      const minted = await Api.mintCode(token, cap);
-      show(minted);
+      await work();
     } catch (err) {
       document.getElementById("admin-result").hidden = true;
       setError(err.message);
     } finally {
       button.disabled = false;
-      button.textContent = "GENERATE";
+      button.textContent = label;
     }
   }
 
-  function show(minted) {
-    document.getElementById("admin-code").textContent = minted.code;
-    document.getElementById("admin-result-label").textContent =
-      `New code — $${Number(minted.cap_usd).toFixed(2)} of AI coaching, shared by everyone who uses it.`;
+  function show(code, message) {
+    document.getElementById("admin-code").textContent = code;
+    document.getElementById("admin-result-label").textContent = message;
     document.getElementById("admin-result").hidden = false;
     document.getElementById("admin-copy").textContent = "Copy";
+    // Copying a code you just switched off is a button that does nothing
+    // useful; the string is still selectable if it's wanted.
+    document.getElementById("admin-copy").hidden = op !== "mint";
+  }
+
+  function money(usd) {
+    return Number(usd || 0).toFixed(2);
   }
 
   /**

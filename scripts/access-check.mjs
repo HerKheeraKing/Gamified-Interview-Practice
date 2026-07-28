@@ -281,15 +281,45 @@ async function main() {
   check("the session resumes", resumed.status, 200);
 
   console.log("\nREVOKING");
-  await call(`/api/admin/codes/${code}`, { method: "PATCH", admin: ADMIN_TOKEN, body: { active: false } });
+
+  // The point of revoking rather than waiting for the cap: this code has
+  // most of its $1 unspent and is still switched off on the next turn.
+  const live = await call("/api/admin/codes", { admin: ADMIN_TOKEN });
+  const target = live.json.codes.find((c) => c.code === code);
+  check("the code still has budget left", target.remaining_usd > 0.9, true);
+
+  const off = await call(`/api/admin/codes/${code}`, { method: "PATCH", admin: ADMIN_TOKEN, body: { active: false } });
+  check("revoke succeeds", off.status, 200);
+  check("and reports it was live until now", off.json.was_active, true);
+  check("the code reads as inactive", off.json.code.active, false);
+  check("spend history survives revocation", off.json.code.spent_usd > 0, true);
+
   const revoked = await coachTurn(guest.json.token);
-  check("a revoked code loses AI", revoked.status, 403);
+  check("a revoked code loses AI despite unspent budget", revoked.status, 403);
 
   const demoted = await call("/api/access", { token: guest.json.token });
   check("and falls back to free rather than erroring", demoted.json.access.tier, "free");
 
   const stillSyncs = await call("/api/log", { token: guest.json.token });
   check("but keeps their case files", stillSyncs.status, 200);
+
+  const again = await call(`/api/admin/codes/${code}`, { method: "PATCH", admin: ADMIN_TOKEN, body: { active: false } });
+  check("revoking twice is a no-op, and says so", again.json.was_active, false);
+
+  // The panel has to tell a wrong token from a wrong code, and both are
+  // 404. Only the second carries a reason — a bad token gets none, so it
+  // can't be used to probe which codes exist.
+  const unknown = await call("/api/admin/codes/CASE-ZZZZ-ZZZZ-ZZZZ", { method: "PATCH", admin: ADMIN_TOKEN, body: { active: false } });
+  check("an unknown code is 404", unknown.status, 404);
+  check("and is distinguishable", unknown.json.reason, "unknown_code");
+
+  const noAuth = await call(`/api/admin/codes/${code}`, { method: "PATCH", admin: "wrong", body: { active: false } });
+  check("a bad token on revoke is 404", noAuth.status, 404);
+  check("and carries no reason to probe with", noAuth.json.reason, undefined);
+
+  const restored = await call(`/api/admin/codes/${code}`, { method: "PATCH", admin: ADMIN_TOKEN, body: { active: true } });
+  check("revocation is reversible", restored.json.code.active, true);
+  check("and the session comes back", (await coachTurn(guest.json.token)).status, 200);
 
   console.log(failures === 0 ? "\nAll checks passed.\n" : `\n${failures} check(s) failed.\n`);
   process.exit(failures === 0 ? 0 : 1);
