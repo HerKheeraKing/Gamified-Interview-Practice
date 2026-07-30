@@ -776,18 +776,25 @@ main {
  * read out by a screen reader as punctuation before the label it is
  * decorating.
  *
- * The glyph is amber, not core-white. White is what a light source
- * physically does at its centre, and it was wrong here anyway: at 10px
- * a white star on a gold pill is a hole punched in the badge rather
- * than the brightest part of it. The badge is small enough that the eye
- * reads the shape before the falloff, and a shape that disagrees with
- * everything around it reads as a mistake. Correctness lost to the
- * thing actually being looked at.
+ * NO `color` HERE, AND THAT IS THE DECLARATION. A pseudo-element
+ * inherits colour from the element it hangs off, so leaving it out is
+ * what makes the star exactly the label's colour — not a second value
+ * that happens to match today and drifts the first time the label is
+ * retuned. The rule reads as an omission and is the opposite: it is the
+ * only way to say "the same colour as that" rather than "this colour,
+ * which is currently the same".
  *
- * So the hue stays in the glyph and the *glow* keeps the three steps —
- * a tight warm-light layer for the hot centre, amber through the
- * middle, lilac at the edge. That is where the light-source quality
- * survives at this size.
+ * It was core-white for a while, on the theory that a light source
+ * blows out at its centre. True of light, wrong at 10px — a white glyph
+ * on a gold pill read as a hole punched in the badge rather than as its
+ * brightest part. The badge is small enough that the eye takes the
+ * shape before the falloff, so a shape disagreeing with everything
+ * around it reads as a mistake. Correctness lost to what is actually
+ * being looked at, which is the right way round.
+ *
+ * The glow still steps through all three — a soft warm-light centre,
+ * amber through the middle, lilac at the edge — because that is where
+ * the light-source quality survives at this size.
  *
  * A pixel larger than the text beside it, because at 9px a star is
  * mostly its own glow and that pixel is what keeps five points instead
@@ -796,7 +803,6 @@ main {
   content: "\2605";
   font-size: 10px;
   line-height: 1;
-  color: rgb(var(--flare-warm));
   text-shadow:
     0 0 3px rgba(var(--flare-core), 0.55),
     0 0 7px rgba(var(--flare-warm), 0.90),
