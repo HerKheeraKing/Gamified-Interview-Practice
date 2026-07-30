@@ -585,6 +585,17 @@ const CaseLog = (() => {
  * The transcript is stored and returned as opaque JSON. This module
  * checks its shape — an array of { role, content } within bounds — and
  * then declines to look inside it. The browser owns what a turn means.
+ *
+ * A draft carries two things, and they are not the same thing. The
+ * transcript is what was said. `pending` is what was still being
+ * written when the case was closed — the composer's contents, never
+ * sent. Keeping them apart is what stops a resumed session opening
+ * with the interviewer replying to half a sentence: turns go back into
+ * the conversation, pending goes back into the box.
+ *
+ * Either one alone is a draft worth keeping. A case with one typed
+ * paragraph and no turns yet is precisely the session most worth not
+ * losing, since nothing about it has reached the model.
  */
 const Drafts = (() => {
   const MODES = ["text", "voice"];
@@ -616,7 +627,7 @@ const Drafts = (() => {
   async function read(db, detectiveId, caseId) {
     const row = await db
       .prepare(
-        `SELECT case_id, mode, transcript, updated_at FROM session_drafts
+        `SELECT case_id, mode, transcript, pending, updated_at FROM session_drafts
          WHERE detective_id = ? AND case_id = ?`
       )
       .bind(detectiveId, caseId)
@@ -630,6 +641,10 @@ const Drafts = (() => {
       caseId: row.case_id,
       mode: row.mode,
       messages: parse(row.transcript),
+      // NULL on every row written before 0003, and read as an empty
+      // composer — which is what those drafts were saved with, there
+      // having been no way to save anything else at the time.
+      pending: row.pending || "",
       updatedAt: row.updated_at,
     };
   }
@@ -644,30 +659,37 @@ const Drafts = (() => {
    * would surface as a conversation that lost a turn, and the only
    * place that could be diagnosed is the one place nobody looks.
    */
-  async function save(db, detectiveId, caseId, mode, messages) {
+  async function save(db, detectiveId, caseId, mode, messages, pending) {
     if (!MODES.includes(mode) || !Number.isInteger(caseId) || !Array.isArray(messages)) {
       return null;
     }
 
     const clean = messages.filter(isTurn).slice(-MAX_DRAFT_TURNS).map(toTurn);
-    if (clean.length === 0) {
+    const draft = typeof pending === "string" ? pending.trim().slice(0, MAX_DRAFT_CHARS) : "";
+
+    // Either half is enough. Requiring a turn was the original rule and
+    // it was wrong in the one case that matters most: an answer typed
+    // and not yet sent is a whole session's work with nothing in the
+    // transcript to show for it.
+    if (clean.length === 0 && !draft) {
       return null;
     }
 
     const now = new Date().toISOString();
     await db
       .prepare(
-        `INSERT INTO session_drafts (detective_id, case_id, mode, transcript, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO session_drafts (detective_id, case_id, mode, transcript, pending, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (detective_id, case_id)
          DO UPDATE SET mode = excluded.mode,
                        transcript = excluded.transcript,
+                       pending = excluded.pending,
                        updated_at = excluded.updated_at`
       )
-      .bind(detectiveId, caseId, mode, JSON.stringify(clean), now)
+      .bind(detectiveId, caseId, mode, JSON.stringify(clean), draft, now)
       .run();
 
-    return { caseId, mode, messages: clean, updatedAt: now };
+    return { caseId, mode, messages: clean, pending: draft, updatedAt: now };
   }
 
   /** Drop the draft for one case. Silent when there wasn't one. */
@@ -1564,7 +1586,9 @@ async function handleApi(request, env, ctx, path) {
     // two half-drafts behind.
     if (request.method === "PUT") {
       const body = await readJson(request);
-      const draft = await Drafts.save(env.DB, detective.id, caseId, body.mode, body.messages);
+      const draft = await Drafts.save(
+        env.DB, detective.id, caseId, body.mode, body.messages, body.pending
+      );
       if (!draft) {
         return Responses.fail("That session had nothing in it to save.", 400);
       }

@@ -185,8 +185,8 @@ const Api = (() => {
    * the work being saved — a failure swallowed here is the exact
    * outcome the button exists to prevent.
    */
-  async function pushDraft(caseId, mode, messages) {
-    const res = await send(`/api/drafts/${caseId}`, "PUT", { mode, messages });
+  async function pushDraft(caseId, mode, messages, pending) {
+    const res = await send(`/api/drafts/${caseId}`, "PUT", { mode, messages, pending });
     return res.draft;
   }
 

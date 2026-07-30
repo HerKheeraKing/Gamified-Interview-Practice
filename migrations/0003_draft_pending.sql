@@ -1,0 +1,26 @@
+-- ============================================================
+-- 0003 — the answer that was still being written
+--
+-- Adds session_drafts.pending: text left in the composer and never
+-- sent. Without it, typing an answer and closing the case lost it —
+-- silently, because an unsent answer was invisible to the check that
+-- decides whether a case has unsaved work at all.
+--
+-- New deployments do not need this: schema.sql already contains it.
+--
+-- Run once against each database created by 0002:
+--
+--   npm run db:migrate:pending           (local)
+--   npm run db:migrate:pending:remote    (production)
+--
+-- RUN ONCE, like 0001 and unlike 0002. SQLite has no
+-- `ADD COLUMN IF NOT EXISTS`, so a second run fails loudly with
+-- "duplicate column name: pending". That error means the migration
+-- already applied and nothing is wrong.
+--
+-- Existing rows get NULL, which the Worker reads as an empty composer —
+-- which is exactly what those drafts were saved with, since there was
+-- no way to save anything else at the time.
+-- ============================================================
+
+ALTER TABLE session_drafts ADD COLUMN pending TEXT;

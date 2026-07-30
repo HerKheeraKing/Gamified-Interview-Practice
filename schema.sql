@@ -126,12 +126,21 @@ CREATE INDEX IF NOT EXISTS idx_detectives_access_code
 -- two modes hold the same shape of transcript and resuming a spoken
 -- session into a chat log (or the reverse) is the one thing this
 -- feature must not do.
+--
+-- pending is the answer that was still being written — text sitting in
+-- the composer that was never sent. It is a column of its own rather
+-- than a final turn in transcript, and that distinction is the point:
+-- a turn is something the interviewer has heard and will reply to, and
+-- folding an unsent draft into the transcript would have Claude answer
+-- a sentence the candidate never finished. Nullable, because most
+-- drafts are saved with an empty box.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS session_drafts (
   detective_id INTEGER NOT NULL REFERENCES detectives(id) ON DELETE CASCADE,
   case_id      INTEGER NOT NULL,
   mode         TEXT    NOT NULL,
   transcript   TEXT    NOT NULL,
+  pending      TEXT,
   updated_at   TEXT    NOT NULL,
   PRIMARY KEY (detective_id, case_id)
 );

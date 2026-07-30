@@ -174,9 +174,26 @@ the primary key rather than by the Worker remembering to check. Closing
 the case drops the draft, because the resume point is spent once the
 attempt is logged.
 
+A draft holds two things. `transcript` is what was said; `pending` is
+the answer still being written — text sitting in the composer that was
+never sent. They are separate columns rather than one list, because a
+turn is something the interviewer has heard and will reply to, and
+folding an unsent draft into the transcript would have Claude open a
+resumed session by answering half a sentence. On resume the turns go
+back into the conversation and `pending` goes back into the box.
+
+Either half alone is a session worth keeping. An answer typed and not
+yet sent is the most valuable thing a draft can hold — nothing about it
+has reached the model, so it exists in that box or nowhere. It is also
+what the composer being invisible to `Practice.hasProgress()` used to
+throw away silently: with no dots set, closing the case discarded a
+typed paragraph without even opening the dialog.
+
 ```bash
 npm run db:migrate:drafts          # local — only if the DB predates this feature
 npm run db:migrate:drafts:remote   # production
+npm run db:migrate:pending         # local — adds session_drafts.pending
+npm run db:migrate:pending:remote  # production
 npm run check:drafts               # offline: does a saved session come back intact?
 ```
 

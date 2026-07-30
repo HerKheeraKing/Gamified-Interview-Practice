@@ -10,6 +10,8 @@
     "db:migrate:remote": "wrangler d1 execute interview-case-files --remote --file=./migrations/0001_access_tiers.sql",
     "db:migrate:drafts": "wrangler d1 execute interview-case-files --local --file=./migrations/0002_session_drafts.sql",
     "db:migrate:drafts:remote": "wrangler d1 execute interview-case-files --remote --file=./migrations/0002_session_drafts.sql",
+    "db:migrate:pending": "wrangler d1 execute interview-case-files --local --file=./migrations/0003_draft_pending.sql",
+    "db:migrate:pending:remote": "wrangler d1 execute interview-case-files --remote --file=./migrations/0003_draft_pending.sql",
     "deploy": "wrangler deploy",
     "coach:length": "node scripts/coach-length.mjs",
     "check:access": "node --experimental-sqlite scripts/access-check.mjs",

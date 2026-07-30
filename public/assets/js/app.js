@@ -249,7 +249,9 @@ const Drafts = (() => {
       throw new Error("There's no conversation on this case to save yet.");
     }
 
-    const draft = await Api.pushDraft(caseId, snapshot.mode, snapshot.messages);
+    const draft = await Api.pushDraft(
+      caseId, snapshot.mode, snapshot.messages, snapshot.pending
+    );
     index.set(caseId, { caseId, mode: draft.mode, updatedAt: draft.updatedAt });
     return draft;
   }
@@ -877,8 +879,17 @@ const ExitConfirm = (() => {
     if (!session) {
       return "The scores you've set haven't been logged. Closing now discards them.";
     }
+
     const mode = session.mode === "voice" ? "Live Voice" : "Text Practice";
-    return `Save this ${mode} session to pick it up later on any device, ` +
+    // Named specifically when it is the only thing at stake. An answer
+    // typed and never sent is the work least likely to be remembered
+    // and the least recoverable if it goes — a sent turn is at least in
+    // the conversation, this is in the box or it is nowhere.
+    const what = session.messages.length
+      ? `this ${mode} session`
+      : "the answer you're part-way through writing";
+
+    return `Save ${what} to pick it up later on any device, ` +
       "or discard it. Either way the dots aren't logged until you close the case.";
   }
 
@@ -2028,9 +2039,28 @@ const Practice = (() => {
    * since switching modes mid-session doesn't clear the one left behind.
    * Handoff has nothing to lose: the prompt lives on the clipboard, not
    * in here.
+   *
+   * And the composer, which this used to miss entirely. `transcript`
+   * only gains a turn inside `send`, so an answer typed and not yet
+   * sent was invisible here — closing the case discarded a paragraph
+   * of work without so much as asking, because as far as this function
+   * could tell nothing had happened. The box is the one place a
+   * detective's own words live before anyone else has seen them, which
+   * makes it the *most* important thing on this list rather than an
+   * afterthought.
    */
   function hasProgress() {
-    return transcript.length > 0 || Voice.hasHistory();
+    return transcript.length > 0 || Voice.hasHistory() || pendingAnswer().length > 0;
+  }
+
+  /**
+   * What's in the composer, if anything.
+   *
+   * Trimmed, so a stray space or a newline left by dictation doesn't
+   * count as work worth warning about.
+   */
+  function pendingAnswer() {
+    return document.getElementById("practice-input").value.trim();
   }
 
   /* ---- saving and resuming a session ---- */
@@ -2051,16 +2081,29 @@ const Practice = (() => {
    * already persist through the normal Close the Case path, and a
    * resume draft that could carry a score would be a second way to
    * write XP — which is exactly the thing this feature must not become.
+   *
+   * The composer rides along as `pending`, separately from the turns.
+   * It is not a turn: nobody has heard it, and appending it to the
+   * transcript would have the interviewer open a resumed session by
+   * replying to a sentence that was never finished. It travels with the
+   * session because it is the part of it that exists only here — a sent
+   * turn is at least recoverable from the conversation, an unsent one
+   * is in the box or it is nowhere.
    */
   function snapshot() {
     const voice = Voice.history();
     const held = { text: transcript, voice };
+    const pending = pendingAnswer();
 
     const preferred = held[mode] && held[mode].length ? mode : null;
     const fallback = transcript.length ? "text" : voice.length ? "voice" : null;
-    const saved = preferred || fallback;
+    // A pending answer with no turns anywhere behind it still belongs
+    // to the mode whose composer it was typed into — which is the case
+    // this whole function used to answer `null` for.
+    const started = preferred || fallback;
+    const saved = started || (pending && held[mode] ? mode : null);
 
-    return saved ? { mode: saved, messages: held[saved] } : null;
+    return saved ? { mode: saved, messages: held[saved], pending } : null;
   }
 
   /**
@@ -2079,18 +2122,38 @@ const Practice = (() => {
    * they'd lose starting fresh.
    */
   function restore(draft, onDiscard) {
-    if (!draft || !draft.messages.length) return false;
+    const pending = draft ? draft.pending || "" : "";
+    if (!draft || (!draft.messages.length && !pending)) return false;
 
     choose(draft.mode);
 
     if (draft.mode === "text") {
       transcript = draft.messages.map((m) => ({ role: m.role, content: m.content }));
-      // Cleared first because `choose` seeds an opening hint into an
-      // empty log, and a resumed conversation is not being started.
-      document.getElementById("chat-log").innerHTML = "";
-      transcript.forEach((turn) => say(turn.role, turn.content));
+      // Only when there are turns to put back. `choose` seeds an
+      // opening hint into an empty log, and a draft that is nothing but
+      // a half-written answer has not started a conversation yet — it
+      // should read as a case waiting to begin, which is what the hint
+      // says.
+      if (transcript.length) {
+        document.getElementById("chat-log").innerHTML = "";
+        transcript.forEach((turn) => say(turn.role, turn.content));
+      }
     } else {
       Voice.seed(draft.messages);
+    }
+
+    // Back into the box, with the caret after it. Restored last so it
+    // survives `choose`, which clears nothing but does re-measure the
+    // composer — and after the transcript, so the answer being written
+    // sits under the conversation it belongs to.
+    if (pending) {
+      const input = document.getElementById("practice-input");
+      input.value = pending;
+      // Assigning .value fires no `input` event, so nothing else would
+      // tell the composer its contents just changed — the box would sit
+      // one line tall under a blank preview card.
+      settleTyping();
+      refreshComposer();
     }
 
     // Whether the conversation is actually back on screen, or only
@@ -2139,13 +2202,30 @@ const Practice = (() => {
   function showResumeBar(draft, carried) {
     const bar = document.getElementById("practice-resume");
     const label = draft.mode === "voice" ? "Live Voice" : "Text Practice";
-    const turns = draft.messages.filter((m) => m.role === "user").length;
-    const answers = `${turns} answer${turns === 1 ? "" : "s"} in`;
 
     document.getElementById("practice-resume-text").textContent = carried
-      ? `Resumed your saved ${label} session — ${answers}.`
-      : `You have a saved ${label} session here — ${answers}. It'll load when this mode can run.`;
+      ? `Resumed your saved ${label} session — ${heldBy(draft)}.`
+      : `You have a saved ${label} session here — ${heldBy(draft)}. It'll load when this mode can run.`;
     bar.hidden = false;
+  }
+
+  /**
+   * What the draft actually holds, in words.
+   *
+   * A draft can now be turns, a half-written answer, or both, and
+   * "0 answers in" was what the turn count said about the third case —
+   * a true number that described the session as empty when the whole
+   * reason it was saved was sitting in the box.
+   */
+  function heldBy(draft) {
+    const turns = draft.messages.filter((m) => m.role === "user").length;
+    const unsent = draft.pending ? "a half-written answer" : "";
+
+    if (!turns) {
+      return unsent || "nothing said yet";
+    }
+    const answers = `${turns} answer${turns === 1 ? "" : "s"} in`;
+    return unsent ? `${answers}, plus ${unsent}` : answers;
   }
 
   return { init, reset, dismiss, hasProgress, snapshot, restore, startFresh };

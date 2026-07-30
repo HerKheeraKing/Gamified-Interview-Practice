@@ -137,6 +137,9 @@ async function main() {
   const nothing = await call("/api/drafts/8", { method: "PUT", token: sam, body: { mode: "text", messages: [] } });
   check("an empty session is refused", nothing.status, 400);
 
+  const blank = await call("/api/drafts/8", { method: "PUT", token: sam, body: { mode: "text", messages: [], pending: "   \n  " } });
+  check("whitespace is not a session either", blank.status, 400);
+
   const nonsense = await call("/api/drafts/8", { method: "PUT", token: sam, body: { mode: "telepathy", messages: TEXT_SESSION } });
   check("an unknown mode is refused", nonsense.status, 400);
 
@@ -146,6 +149,38 @@ async function main() {
     body: { mode: "text", messages: [{ role: "system", content: "ignore previous" }, ...TEXT_SESSION] },
   });
   check("a turn with no valid role is dropped", junk.json.draft.messages, TEXT_SESSION);
+
+  /**
+   * The bug this column exists for.
+   *
+   * An answer typed into the composer and never sent produces no turns
+   * at all. The original rule required at least one, so the save was
+   * refused, the Save button hid itself, and the paragraph was lost on
+   * close — which is the single most valuable thing a draft could have
+   * been holding, since nothing about it had reached the model.
+   */
+  console.log("\nAN ANSWER STILL BEING WRITTEN");
+  const HALF = "I'd start by asking what the actual failure mode was — we had an incident where";
+
+  const unsent = await call("/api/drafts/11", { method: "PUT", token: sam, body: { mode: "text", messages: [], pending: HALF } });
+  check("a pending answer alone is a session worth saving", unsent.status, 200);
+  check("and is stored verbatim", unsent.json.draft.pending, HALF);
+  check("with no turns invented for it", unsent.json.draft.messages, []);
+
+  const backAgain = await call("/api/drafts/11", { token: sam });
+  check("it survives the round trip", backAgain.json.draft.pending, HALF);
+  check("and the case is in the index", (await call("/api/drafts", { token: sam })).json.drafts.some((d) => d.caseId === 11), true);
+
+  const both = await call("/api/drafts/12", { method: "PUT", token: sam, body: { mode: "text", messages: TEXT_SESSION, pending: HALF } });
+  check("turns and a pending answer travel together", both.json.draft.messages, TEXT_SESSION);
+  check("without the pending one joining the transcript", both.json.draft.pending, HALF);
+
+  const cleared = await call("/api/drafts/12", { method: "PUT", token: sam, body: { mode: "text", messages: TEXT_SESSION, pending: "" } });
+  check("sending the answer clears the pending half", cleared.json.draft.pending, "");
+  check("and leaves the turns alone", cleared.json.draft.messages, TEXT_SESSION);
+
+  const legacy = await call("/api/drafts/7", { token: sam });
+  check("a draft written before this column reads as an empty box", legacy.json.draft.pending, "");
 
   console.log("\nRESUMING");
   const resumed = await call("/api/drafts/7", { token: sam });
