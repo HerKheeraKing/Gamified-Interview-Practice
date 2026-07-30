@@ -209,6 +209,7 @@ const RankEngine = (() => {
 
 const Render = (() => {
   let activeRound = 1;
+  let swipeWired = false;
 
   function roundCarousel() {
     const track = document.getElementById("round-track");
@@ -270,12 +271,23 @@ const Render = (() => {
   }
 
   function wireCarousel() {
-    // Dot clicks
+    // Dot clicks. The dots are rebuilt from scratch by roundCarousel()
+    // on every render, so rebinding here just matches new nodes to new
+    // listeners — nothing accumulates.
     document.querySelectorAll(".round-dot").forEach((dot) => {
       dot.addEventListener("click", () => goToRound(Number(dot.dataset.roundId)));
     });
 
-    // Drag / swipe
+    // Drag / swipe. Unlike the dots, #round-track is never recreated —
+    // roundCarousel() only replaces its innerHTML — so binding these
+    // listeners on every call stacked a fresh set on top of the last.
+    // One physical swipe then fired onEnd once per accumulated
+    // listener, each independently advancing a round: three renders
+    // since load meant one swipe jumped three rounds. Wiring this once
+    // is what keeps one swipe equal to one round change.
+    if (swipeWired) return;
+    swipeWired = true;
+
     const track = document.getElementById("round-track");
     let startX = 0;
     let dragging = false;
@@ -463,7 +475,28 @@ const ScoreModal = (() => {
     BodyScroll.lock();
   }
 
+  /**
+   * The X button, backdrop click, and Escape all land here. Closing
+   * this way is a discard, not a save, so it asks first whenever
+   * there's something on the case that hasn't been scored — a dot set
+   * by hand, a typed exchange, or a Live Voice conversation. `submit`
+   * below is the one exit that bypasses this: it has already saved the
+   * case and calls `forceClose` directly.
+   */
   function close() {
+    if (hasUnsavedWork()) {
+      DiscardConfirm.open(forceClose);
+      return;
+    }
+    forceClose();
+  }
+
+  function hasUnsavedWork() {
+    const scored = Object.values(scores).some((value) => value > 0);
+    return scored || Practice.hasProgress();
+  }
+
+  function forceClose() {
     document.getElementById("case-modal-backdrop").classList.remove("open");
     BodyScroll.unlock();
     Practice.reset(null);
@@ -553,11 +586,51 @@ const ScoreModal = (() => {
     };
 
     Storage.saveEntry(entry);
-    close();
+    forceClose();
     Render.all();
   }
 
   return { open, close, submit, applyGrades, updateTotal };
+})();
+
+/* ---------------------------------------------------------- */
+/* 4b. DISCARD CONFIRMATION                                     */
+/* ---------------------------------------------------------- */
+
+/**
+ * The one warning between a close attempt and losing a case's progress.
+ *
+ * Shares the reset-confirm modal's markup and glass so it reads as the
+ * same kind of decision, not a browser dialog to reflex past. It holds
+ * no opinion about what "unsaved" means — ScoreModal decides that and
+ * hands over the callback that actually discards and closes.
+ */
+const DiscardConfirm = (() => {
+  let onConfirm = null;
+
+  function init() {
+    document.getElementById("discard-cancel").addEventListener("click", close);
+    document.getElementById("discard-confirm").addEventListener("click", () => {
+      const run = onConfirm;
+      close();
+      if (run) run();
+    });
+    document.getElementById("discard-modal-backdrop").addEventListener("click", (e) => {
+      if (e.target.id === "discard-modal-backdrop") close();
+    });
+  }
+
+  function open(confirmed) {
+    onConfirm = confirmed;
+    document.getElementById("discard-modal-backdrop").classList.add("open");
+  }
+
+  function close() {
+    document.getElementById("discard-modal-backdrop").classList.remove("open");
+    onConfirm = null;
+  }
+
+  return { init, close };
 })();
 
 /* ---------------------------------------------------------- */
@@ -1675,7 +1748,22 @@ const Practice = (() => {
     return closeMicMenu();
   }
 
-  return { init, reset, dismiss };
+  /**
+   * Whether this case has anything on it that closing would throw away.
+   *
+   * Scored dots are ScoreModal's own business and checked there. This
+   * covers the two modes that hold state of their own: a typed exchange
+   * Coach hasn't graded yet, and a Live Voice conversation in the same
+   * position — checked regardless of which mode is on screen right now,
+   * since switching modes mid-session doesn't clear the one left behind.
+   * Handoff has nothing to lose: the prompt lives on the clipboard, not
+   * in here.
+   */
+  function hasProgress() {
+    return transcript.length > 0 || Voice.hasHistory();
+  }
+
+  return { init, reset, dismiss, hasProgress };
 })();
 
 /* ---------------------------------------------------------- */
@@ -2198,6 +2286,7 @@ function bootstrap() {
   Views.init();
   Login.init();
   Practice.init();
+  DiscardConfirm.init();
 
   // Returning detectives sync silently — no modal, no spinner, no wait.
   Storage.refresh().then((changed) => {
@@ -2227,10 +2316,15 @@ function bootstrap() {
 
   // A live microphone behind a dismissed modal is the one failure worth
   // wiring a keyboard escape for; ScoreModal.close() shuts Practice down.
-  // An open menu gets first refusal, so Escape dismisses that rather than
-  // throwing away the case behind it.
+  // The discard-confirm dialog gets first refusal when it's the thing on
+  // top, then an open menu, so Escape always dismisses whatever the
+  // detective is actually looking at rather than reaching past it.
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    if (document.getElementById("discard-modal-backdrop").classList.contains("open")) {
+      DiscardConfirm.close();
+      return;
+    }
     if (Practice.dismiss()) return;
     ScoreModal.close();
   });

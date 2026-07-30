@@ -382,6 +382,26 @@
     </div>
   </div>
 
+  <!-- DISCARD PROGRESS CONFIRM MODAL
+       Same reasoning as RESET CONFIRM below: closing a case with dots
+       set or a conversation going on is a real decision, not a misclick
+       to shrug off. Shares its glass and sizing for the same reason. -->
+  <div id="discard-modal-backdrop" class="modal-backdrop">
+    <div class="modal login-modal">
+      <h3 class="login-title">Leave This <em>Case</em>?</h3>
+      <p class="login-sub">
+        This session's scores and conversation haven't been saved.
+        Closing now discards them.
+      </p>
+      <div class="login-actions">
+        <button type="button" class="pill-btn" id="discard-cancel">CANCEL</button>
+        <button type="button" class="pill-btn pill-btn-danger" id="discard-confirm">
+          DISCARD AND CLOSE
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- LOGIN MODAL -->
   <div id="login-modal-backdrop" class="modal-backdrop">
     <div class="modal login-modal">

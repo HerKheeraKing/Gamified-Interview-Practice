@@ -927,6 +927,19 @@ const Voice = (() => {
   }
 
   /**
+   * Whether this session has said anything yet.
+   *
+   * `attached()` alone goes true the moment Live Voice mode opens,
+   * before a word is spoken — attach() creates the session up front so a
+   * typed aside works immediately. That makes it useless for asking
+   * "would closing this lose anything": the answer here is scoped to
+   * the actual conversation, `session.messages`, not the session object.
+   */
+  function hasHistory() {
+    return Boolean(session && session.messages.length);
+  }
+
+  /**
    * Open a conversation about one case. Does not touch the microphone —
    * typed asides work immediately, and `openMic` adds speech on top.
    *
@@ -1438,7 +1451,7 @@ const Voice = (() => {
   }
 
   return {
-    supported, attached, attach, openMic, closeMic, stop, submit,
+    supported, attached, hasHistory, attach, openMic, closeMic, stop, submit,
     listening, busy, interrupt,
   };
 })();
