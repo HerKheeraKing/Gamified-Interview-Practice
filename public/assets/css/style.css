@@ -687,7 +687,7 @@ main {
   gap: 10px;
 }
 
-/* Gold, and the only gold anywhere on the site.
+/* Warm light, and the only warm light anywhere on the site.
  *
  * It was cyan, which was the mistake. Every glass edge, focus ring,
  * case number and scrollbar on this page is already some value of cyan,
@@ -702,15 +702,29 @@ main {
  * Turning up the cyan would only have made it a louder member of the
  * same family.
  *
- * The tokens are declared here rather than in :root deliberately. This
- * is a one-element accent and it should stay that way; a --gold sitting
- * beside --accent in the token block is an invitation to spend it
- * somewhere else, and the second thing wearing it is the moment it
- * stops meaning "saved session".
+ * THREE COLOURS, NOT ONE, and the count is the whole effect. Real
+ * emitted light does not glow in its own colour: it blows out to white
+ * where it is brightest, keeps its hue in the mid-range, and shifts
+ * cool as it falls off into the dark. A single gold at three opacities
+ * reads as a tinted sticker, because every part of it agrees about the
+ * hue. Making the core hotter and the falloff cooler than the middle is
+ * what makes the same three shadows read as something luminous.
+ *
+ *   --flare-core  white, faintly warm. Where the light is too bright to
+ *                 have a colour left.
+ *   --flare-warm  the amber the badge actually is.
+ *   --flare-halo  the lilac the bloom decays into at its outer edge.
+ *
+ * Declared here rather than in :root deliberately. This is a
+ * one-element accent and it should stay one; a --gold sitting beside
+ * --accent in the token block is an invitation to spend it somewhere
+ * else, and the second thing wearing it is the moment it stops meaning
+ * "saved session".
  */
 .case-draft {
-  --gold: 255, 193, 94;
-  --gold-lit: 255, 233, 186;
+  --flare-core: 255, 250, 240;
+  --flare-warm: 255, 193, 94;
+  --flare-halo: 199, 158, 255;
 
   flex: none;
   display: inline-flex;
@@ -719,30 +733,40 @@ main {
   font-size: 9px;
   letter-spacing: 1px;
   text-transform: uppercase;
-  color: rgb(var(--gold-lit));
-  border: 1px solid rgba(var(--gold), 0.42);
+  color: rgb(255, 233, 186);
+  border: 1px solid rgba(var(--flare-warm), 0.42);
   border-radius: 999px;
   padding: 3px 10px;
 
-  /* Same two-layer recipe as every other glass surface here — a raking
-     highlight over a tinted base — so the badge reads as lit from the
-     same direction as the card it sits on. A flat fill would have been
-     a sticker on the glass rather than part of it. */
+  /* The site's two-layer glass recipe — a raking highlight over a
+     tinted base — so the badge is lit from the same direction as the
+     card it sits on rather than pasted onto it. The gradient runs the
+     same way the light does: hot at the corner it is lit from, amber
+     through the middle, cooling to lilac at the far end. */
   background:
-    linear-gradient(135deg, rgba(var(--gold-lit), 0.20) 0%, rgba(var(--gold), 0.06) 55%, rgba(var(--gold), 0.14) 100%),
+    linear-gradient(135deg,
+      rgba(var(--flare-core), 0.22) 0%,
+      rgba(var(--flare-warm), 0.10) 45%,
+      rgba(var(--flare-halo), 0.13) 100%),
     rgba(48, 34, 14, 0.45);
 
-  /* The radiant edge, in three parts: a bloom that leaves the border and
-     falls off, a tighter one that keeps the shape legible at 9px, and an
-     inner top highlight so the pill looks convex rather than printed.
-     Kept under the card's own 0 0 30px bloom — a badge that out-glows
-     the panel holding it stops looking like it belongs to it. */
+  /* The radiant edge, outward in three steps, each one cooler and wider
+     than the last: a tight warm ring that keeps a 9px pill legible, the
+     amber bloom proper, and a lilac falloff that is the last thing to
+     touch the card. The inner highlight is core-white so the top edge
+     reads as a lit surface and the pill looks convex rather than
+     printed. All of it stays under the card's own 0 0 30px bloom — a
+     badge that out-glows the panel holding it stops looking attached to
+     it. */
   box-shadow:
-    0 0 16px rgba(var(--gold), 0.26),
-    0 0 5px rgba(var(--gold), 0.30),
-    inset 0 1px 0 rgba(var(--gold-lit), 0.34);
+    0 0 5px rgba(var(--flare-warm), 0.34),
+    0 0 16px rgba(var(--flare-warm), 0.26),
+    0 0 30px rgba(var(--flare-halo), 0.22),
+    inset 0 1px 0 rgba(var(--flare-core), 0.34);
 
-  text-shadow: 0 0 9px rgba(var(--gold), 0.55);
+  text-shadow:
+    0 0 8px rgba(var(--flare-warm), 0.55),
+    0 0 16px rgba(var(--flare-halo), 0.35);
 }
 
 /* The star, as a pseudo-element rather than markup.
@@ -752,15 +776,25 @@ main {
  * read out by a screen reader as punctuation before the label it is
  * decorating.
  *
- * A shade brighter and a size larger than the text it sits beside,
- * because at 9px a star is mostly its own glow — the extra pixel is
- * what keeps five points instead of a dot. */
+ * This is the one part that is genuinely a light source rather than a
+ * lit surface, so it carries the full three-step falloff at its
+ * shortest and hottest: the glyph itself is core-white — not amber —
+ * with the hue arriving in the bloom around it and the lilac only in
+ * the outermost layer. Painting the glyph amber and glowing amber
+ * around it is what makes a star look like a sticker of a star.
+ *
+ * A pixel larger than the text beside it, because at 9px a star is
+ * mostly its own glow and that pixel is what keeps five points instead
+ * of a dot. */
 .case-draft::before {
   content: "\2605";
   font-size: 10px;
   line-height: 1;
-  color: rgb(var(--gold-lit));
-  text-shadow: 0 0 8px rgba(var(--gold), 0.85);
+  color: rgb(var(--flare-core));
+  text-shadow:
+    0 0 3px rgba(var(--flare-core), 0.95),
+    0 0 7px rgba(var(--flare-warm), 0.90),
+    0 0 14px rgba(var(--flare-halo), 0.60);
 }
 
 .case-score-empty {
