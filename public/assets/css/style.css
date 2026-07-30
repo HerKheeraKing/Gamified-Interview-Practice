@@ -644,6 +644,36 @@ main {
   margin-top: 3px;
 }
 
+/* "Saved session" on a case card.
+ *
+ * Sits on the case number's row rather than floating over the corner:
+ * the card is a flex column with a fixed 20px padding, and an absolutely
+ * positioned badge would overlap the question on the narrowest grid
+ * column, which is where the text is already tightest.
+ *
+ * Cyan, and the only cyan on an unpracticed card. The score badges below
+ * are white and mean "what this was worth"; this means "there is
+ * something here to come back to", which is a different kind of fact and
+ * should not be mistaken for a score at a glance. */
+.case-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.case-draft {
+  flex: none;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+  border: 1px solid rgba(165, 230, 255, 0.28);
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: rgba(125, 211, 252, 0.07);
+}
+
 .case-score-empty {
   border-top: 1px solid rgba(255,255,255,0.06);
 }
@@ -1196,6 +1226,43 @@ body.scroll-locked {
    under it to protect — it is the last thing on the Generate tab — so
    reserving 18px and a 10px margin there just parks dead space beneath
    the button and makes the two tabs sit differently. */
+#exit-error:empty {
+  display: none;
+}
+
+/* Three buttons, not two. .login-actions caps each at 180px and splits
+   the row evenly, which at three across leaves each one too narrow for
+   "SAVE SESSION" without wrapping. Letting them size to their content
+   and wrap as a group keeps the words on one line on a phone and the
+   row centred on a desktop. */
+.exit-actions {
+  flex-wrap: wrap;
+}
+
+.exit-actions .pill-btn {
+  flex: 0 1 auto;
+  max-width: none;
+  padding-left: 22px;
+  padding-right: 22px;
+  letter-spacing: 1.4px;
+}
+
+/* The resumed-session bar. Everything visual is inherited from
+   .practice-note.note-info; all this adds is room for the button that
+   sits inline at the end of the sentence. */
+.practice-resume .link-btn {
+  margin-left: 8px;
+  color: var(--accent-soft);
+  /* .link-btn is `user-select: all` so a minted invite code can be
+     swiped in one gesture. This one is a control, not a value to copy,
+     and selecting its label on every tap is only ever in the way. */
+  user-select: auto;
+}
+
+.practice-resume .link-btn:hover {
+  color: var(--text-primary);
+}
+
 #admin-error:empty {
   display: none;
 }

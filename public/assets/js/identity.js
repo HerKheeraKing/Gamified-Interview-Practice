@@ -157,22 +157,60 @@ const Api = (() => {
     return attempt(() => send("/api/log", "DELETE"));
   }
 
+  /* ---- saved practice sessions ---- */
+
+  /**
+   * Which cases have a saved session, without their transcripts.
+   * Null when signed out or unreachable, which the caller reads as
+   * "no badges to draw" rather than as an error worth showing.
+   */
+  async function pullDrafts() {
+    const res = await quietly(() => send("/api/drafts", "GET"));
+    return res ? res.drafts : null;
+  }
+
+  /** One saved session in full, or null. */
+  async function pullDraft(caseId) {
+    const res = await quietly(() => send(`/api/drafts/${caseId}`, "GET"));
+    return res ? res.draft : null;
+  }
+
+  /**
+   * Save (or overwrite) the session for one case.
+   *
+   * The one draft call that throws. Every other call in this module is
+   * something the site does on the detective's behalf, quietly, and can
+   * fail without anyone being worse off. This one runs because a button
+   * marked SAVE SESSION was pressed and the modal is about to close on
+   * the work being saved — a failure swallowed here is the exact
+   * outcome the button exists to prevent.
+   */
+  async function pushDraft(caseId, mode, messages) {
+    const res = await send(`/api/drafts/${caseId}`, "PUT", { mode, messages });
+    return res.draft;
+  }
+
+  /** Drop a saved session. Best effort — see quietly. */
+  async function dropDraft(caseId) {
+    await quietly(() => send(`/api/drafts/${caseId}`, "DELETE"));
+  }
+
   /**
    * Sync is best-effort: a dead network must never break the local
    * experience, so failures collapse to null and are logged, not thrown.
-   * Only signIn (where the user is watching) reports errors upward.
+   * Only signIn and pushDraft (where the user is watching, having
+   * pressed a button that promised something) report errors upward.
    *
    * A rejected token is the exception worth acting on — it means the
    * session is gone for good, so we drop it rather than retrying it on
    * every page load forever.
    */
-  async function attempt(call) {
+  async function quietly(call) {
     if (!Identity.isSignedIn()) {
       return null;
     }
     try {
-      const res = await call();
-      return res.log;
+      return await call();
     } catch (err) {
       if (err.status === 401) {
         Identity.clear();
@@ -180,6 +218,12 @@ const Api = (() => {
       console.warn("Sync unavailable:", err.message);
       return null;
     }
+  }
+
+  /** The same policy, for the three calls that only ever want the log. */
+  async function attempt(call) {
+    const res = await quietly(call);
+    return res ? res.log : null;
   }
 
   /**
@@ -290,5 +334,9 @@ const Api = (() => {
     return data;
   }
 
-  return { signIn, refreshAccess, mintCode, revokeCode, revokeAllCodes, pullLog, pushLog, clearLog };
+  return {
+    signIn, refreshAccess, mintCode, revokeCode, revokeAllCodes,
+    pullLog, pushLog, clearLog,
+    pullDrafts, pullDraft, pushDraft, dropDraft,
+  };
 })();

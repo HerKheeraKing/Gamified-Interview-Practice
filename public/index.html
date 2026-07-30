@@ -223,6 +223,16 @@
           </div>
 
           <div class="practice-panel" id="practice-panel" hidden>
+            <!-- Only on screen when a saved session was resumed into
+                 this case. Wears the note's info styling because it is
+                 the same kind of statement, and sits above the note
+                 rather than replacing it — the budget line underneath
+                 is still true and still worth reading. -->
+            <p class="practice-note note-info practice-resume" id="practice-resume" hidden>
+              <span id="practice-resume-text"></span>
+              <button type="button" class="link-btn" id="practice-resume-fresh">Start fresh</button>
+            </p>
+
             <p class="practice-note" id="practice-note"></p>
 
             <div class="practice-stage" id="stage-text" hidden>
@@ -382,23 +392,30 @@
     </div>
   </div>
 
-  <!-- DISCARD PROGRESS CONFIRM MODAL
+  <!-- LEAVE THE CASE MODAL
        Same reasoning as RESET CONFIRM below: closing a case with dots
        set or a conversation going on is a real decision, not a misclick
-       to shrug off. Shares its glass and sizing for the same reason. -->
-  <div id="discard-modal-backdrop" class="modal-backdrop">
+       to shrug off. Shares its glass and sizing for the same reason.
+
+       Three buttons, in increasing order of what they cost: keep the
+       work, throw it away, change your mind. Save is primary because it
+       is the answer most people want and the one that was missing —
+       Discard stays in the danger colour so the irreversible option
+       never becomes the easy one to hit. Save hides itself when the
+       case has no conversation on it to save. -->
+  <div id="exit-modal-backdrop" class="modal-backdrop">
     <div class="modal login-modal">
       <h3 class="login-title">Leave This <em>Case</em>?</h3>
-      <p class="login-sub">
-        This session's scores and conversation haven't been saved.
-        Closing now discards them.
-      </p>
-      <div class="login-actions">
-        <button type="button" class="pill-btn" id="discard-cancel">CANCEL</button>
-        <button type="button" class="pill-btn pill-btn-danger" id="discard-confirm">
-          DISCARD AND CLOSE
-        </button>
+      <p class="login-sub" id="exit-sub"></p>
+      <div class="login-actions exit-actions">
+        <button type="button" class="pill-btn pill-btn-primary" id="exit-save">SAVE SESSION</button>
+        <button type="button" class="pill-btn pill-btn-danger" id="exit-discard">DISCARD</button>
+        <button type="button" class="pill-btn" id="exit-cancel">CANCEL</button>
       </div>
+      <!-- Empty unless a save actually failed, and collapsed when it is:
+           it is the last thing in the box, so reserving a line for it
+           would park dead space under the buttons. -->
+      <p class="login-error" id="exit-error"></p>
     </div>
   </div>
 

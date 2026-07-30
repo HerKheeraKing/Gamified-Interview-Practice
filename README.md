@@ -57,8 +57,8 @@ everything lives in `localStorage`. Signing in adds a Cloudflare D1
 mirror so the same case log follows you between devices.
 
 ```
-worker/index.js              # API: /api/session, /api/log, /api/access, /api/admin/*
-schema.sql                   # D1 tables: detectives, sessions, case_log, invite_codes
+worker/index.js              # API: /api/session, /api/log, /api/access, /api/drafts, /api/admin/*
+schema.sql                   # D1 tables: detectives, sessions, case_log, invite_codes, session_drafts
 public/assets/js/identity.js # client: saved username + the only fetch() calls
 ```
 
@@ -105,6 +105,8 @@ npm install
 npx wrangler d1 create interview-case-files   # paste database_id into wrangler.toml
 npm run db:init          # create tables locally
 npm run db:init:remote   # create tables on Cloudflare
+                         # (schema.sql is complete — an existing database
+                         #  needs the migrations instead, see below)
 ```
 
 ### Local dev
@@ -136,8 +138,10 @@ account and without leaking anything:
   Run `npm run db:init:remote`. **A `d1 create` makes an empty database;
   the schema is a separate step, and renaming or recreating either the
   Worker or the database does not carry it over.** If `missing_tables`
-  lists only some tables, the database predates a schema change — run
-  `npm run db:migrate:remote` instead.
+  lists only some tables, the database predates a schema change — the
+  `hint` field names the exact command, because the migrations are not
+  interchangeable (`invite_codes` → `npm run db:migrate:remote`,
+  `session_drafts` → `npm run db:migrate:drafts:remote`).
 - `anthropic_key_set: false` — only the two AI modes are affected, never
   login. Run `npx wrangler secret put ANTHROPIC_API_KEY`. Secrets are
   attached to a Worker *by name*, so a rename leaves them behind.
@@ -146,6 +150,44 @@ account and without leaking anything:
 - `admin_token_set: false` — `/api/admin/*` answers 404. Same fix.
 
 `wrangler tail` logs the failing method and path alongside the error.
+
+## Saved sessions
+
+Closing a case with a conversation on it asks first, and the dialog has
+three answers rather than two:
+
+- **Save session** — the transcript is written to `session_drafts` and
+  syncs like everything else, so the case resumes on any device.
+- **Discard** — leave with nothing kept. Unchanged from before.
+- **Cancel** — stay in the case. The backdrop and Escape both mean this,
+  because the safest of the three is the one a stray tap should land on.
+
+Reopening a case with a saved session restores it automatically, in the
+mode it was saved in — a Text Practice draft comes back as chat bubbles,
+a Live Voice draft is seeded into the session so the interviewer
+remembers the whole conversation. A line above the panel says it was
+resumed and offers **Start fresh**, which drops the draft and works the
+case cold. Cases with something saved are marked in the grid.
+
+One draft per case per detective: saving again overwrites, enforced by
+the primary key rather than by the Worker remembering to check. Closing
+the case drops the draft, because the resume point is spent once the
+attempt is logged.
+
+```bash
+npm run db:migrate:drafts          # local — only if the DB predates this feature
+npm run db:migrate:drafts:remote   # production
+npm run check:drafts               # offline: does a saved session come back intact?
+```
+
+**A draft is not a score.** `session_drafts` sits beside `case_log` and
+neither reads the other: saving a session writes no XP, resuming one
+grants none, and dropping the whole table would cost a detective nothing
+but their place in a conversation. That separation is the feature rather
+than tidiness — a resume point that could move a number in `case_log`
+would be a second way to earn XP, and only one of them is scored.
+`npm run check:drafts` asserts it directly, by logging a real entry and
+checking it is byte-identical after a save, a resume and a discard.
 
 ## AI practice modes
 

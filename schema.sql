@@ -1,11 +1,12 @@
 -- ============================================================
 -- The Interview Case Files — D1 schema
 --
--- Four tables, one job each:
---   detectives    - who you are
---   sessions      - which devices are signed in as you
---   case_log      - what you've done
---   invite_codes  - who may spend money on AI coaching, and how much
+-- Five tables, one job each:
+--   detectives      - who you are
+--   sessions        - which devices are signed in as you
+--   case_log        - what you've done
+--   invite_codes    - who may spend money on AI coaching, and how much
+--   session_drafts  - a practice session you left half-finished
 --
 -- Passwordless today: password_hash / password_salt stay NULL and
 -- the Worker treats a NULL hash as "no credential required". Adding
@@ -95,3 +96,42 @@ CREATE TABLE IF NOT EXISTS invite_codes (
 
 CREATE INDEX IF NOT EXISTS idx_detectives_access_code
   ON detectives (access_code);
+
+-- ============================================================
+-- Session drafts: the half-finished conversation, not the score.
+--
+-- case_log is what a case was worth. This is what was said while
+-- working it, kept so closing the modal on a train doesn't cost the
+-- last twenty minutes of practice. Nothing here is ever read by the
+-- XP, rank or streak logic — a draft is a resume point and carries no
+-- score at all, which is why it is a table beside case_log rather than
+-- a column inside it.
+--
+-- One draft per detective per case, enforced by the primary key rather
+-- than by the Worker remembering to check. Saving again is an UPSERT
+-- that overwrites, so "save" always means the same thing no matter how
+-- many times a case has been opened.
+--
+-- detective_id, not user_id, because that is what the other three
+-- tables call this column and a schema with two names for one thing
+-- makes every join a question.
+--
+-- transcript is a JSON array of { role, content }, stored as TEXT
+-- because that is the only shape D1 has for it — and because the
+-- Worker never reads inside it. It is validated on the way in, handed
+-- back verbatim on the way out, and the browser is the only layer that
+-- knows what a turn looks like.
+--
+-- mode is "text" or "voice". Saved rather than inferred, because the
+-- two modes hold the same shape of transcript and resuming a spoken
+-- session into a chat log (or the reverse) is the one thing this
+-- feature must not do.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS session_drafts (
+  detective_id INTEGER NOT NULL REFERENCES detectives(id) ON DELETE CASCADE,
+  case_id      INTEGER NOT NULL,
+  mode         TEXT    NOT NULL,
+  transcript   TEXT    NOT NULL,
+  updated_at   TEXT    NOT NULL,
+  PRIMARY KEY (detective_id, case_id)
+);

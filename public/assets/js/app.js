@@ -168,6 +168,120 @@ const Storage = (() => {
 })();
 
 /* ---------------------------------------------------------- */
+/* 1b. SAVED SESSIONS                                          */
+/* ---------------------------------------------------------- */
+
+/**
+ * Half-finished practice sessions, and where they live.
+ *
+ * The mirror of Storage, and deliberately not part of it. Storage keeps
+ * a log that must read instantly and work offline, so it caches every
+ * entry in localStorage and treats the server as a background concern.
+ * A draft is the opposite kind of thing: it is written once, on a
+ * button press, read once, when a case is reopened, and its whole
+ * purpose is to be there on a different device. Caching transcripts
+ * locally would buy nothing and would have to be reconciled.
+ *
+ * What is cached is the *index* — which cases have a draft — because
+ * the case grid asks that question once per card on every render and
+ * cannot wait for a round trip to draw a badge.
+ *
+ * Signed out, every function here is a no-op that reports "no drafts".
+ * There is no account to store one against, and the site is expected to
+ * work anyway.
+ *
+ * Nothing in this module reads or writes XP. See the Worker's Drafts
+ * layer for why that separation is load-bearing rather than tidy.
+ */
+const Drafts = (() => {
+  // caseId -> { mode, updatedAt }. Empty until the first refresh lands,
+  // which means the badges appear a beat after the grid does — the same
+  // bargain Storage.refresh makes, for the same reason.
+  let index = new Map();
+
+  /**
+   * Re-read the index. True when it changed, so the caller knows
+   * whether redrawing the grid is worth it.
+   */
+  async function refresh() {
+    const drafts = await Api.pullDrafts();
+    const next = new Map((drafts || []).map((d) => [d.caseId, d]));
+    if (same(index, next)) {
+      return false;
+    }
+    index = next;
+    return true;
+  }
+
+  /** Forget everything without asking the server — used on sign-out. */
+  function clear() {
+    const had = index.size > 0;
+    index = new Map();
+    return had;
+  }
+
+  function has(caseId) {
+    return index.has(caseId);
+  }
+
+  /** The full draft for one case, or null. Always a fresh read. */
+  async function load(caseId) {
+    if (!has(caseId)) {
+      return null;
+    }
+    return Api.pullDraft(caseId);
+  }
+
+  /**
+   * Save a session, and only then update the index.
+   *
+   * Throws when the save didn't land — including when there is no
+   * account to save it to, which is a refusal the caller has to show
+   * rather than a failure to log. The index is written from the
+   * server's answer, so a badge can only ever appear for a draft that
+   * genuinely exists.
+   */
+  async function save(caseId, snapshot) {
+    if (!Identity.isSignedIn()) {
+      throw new Error("Sign in with a codename first — saved sessions live on your account.");
+    }
+    if (!snapshot) {
+      throw new Error("There's no conversation on this case to save yet.");
+    }
+
+    const draft = await Api.pushDraft(caseId, snapshot.mode, snapshot.messages);
+    index.set(caseId, { caseId, mode: draft.mode, updatedAt: draft.updatedAt });
+    return draft;
+  }
+
+  /**
+   * Drop a saved session. Best effort on the wire, immediate on screen:
+   * the badge goes now because the detective just asked for it to, and
+   * a delete that fails is a row that gets overwritten the next time
+   * this case is saved.
+   */
+  function drop(caseId) {
+    index.delete(caseId);
+    Api.dropDraft(caseId);
+  }
+
+  function same(before, after) {
+    if (before.size !== after.size) {
+      return false;
+    }
+    for (const [caseId, draft] of after) {
+      const was = before.get(caseId);
+      if (!was || was.updatedAt !== draft.updatedAt || was.mode !== draft.mode) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  return { refresh, clear, has, load, save, drop };
+})();
+
+/* ---------------------------------------------------------- */
 /* 2. RANK LOGIC (pure)                                        */
 /* ---------------------------------------------------------- */
 
@@ -370,9 +484,20 @@ const Render = (() => {
         `
         : `<div class="case-score case-score-empty"><span class="cs-label">not yet practiced</span></div>`;
 
+      // A draft is a place to come back to, not a result, so it is
+      // marked at the top of the card beside the case number rather
+      // than down in the score row. Absent entirely when there is none:
+      // an empty slot on every other card would be a column of nothing.
+      const draftBadge = Drafts.has(c.id)
+        ? `<span class="case-draft">saved session</span>`
+        : "";
+
       return `
         <button class="case-card" data-case-id="${c.id}">
-          <span class="case-num">#${String(c.id).padStart(2, "0")}</span>
+          <span class="case-head">
+            <span class="case-num">#${String(c.id).padStart(2, "0")}</span>
+            ${draftBadge}
+          </span>
           <span class="case-q">${c.question}</span>
           ${scoreBadge}
         </button>
@@ -473,6 +598,35 @@ const ScoreModal = (() => {
 
     document.getElementById("case-modal-backdrop").classList.add("open");
     BodyScroll.lock();
+
+    resume(activeCase.id);
+  }
+
+  /**
+   * Put a saved session back, if there is one.
+   *
+   * The modal is already open and already usable by the time this runs.
+   * That ordering is deliberate: the draft costs a round trip, and a
+   * case file that waits on the network before it will show you the
+   * question is worse than one that fills a conversation in a moment
+   * later. Drafts.has() means the trip is only ever made for a case
+   * that actually has something to fetch.
+   *
+   * The guard on the way back is the point of the whole function being
+   * async. A slow answer can arrive after the case was closed, or after
+   * a different one was opened, and restoring it then would drop a
+   * stranger's conversation into whatever is on screen.
+   */
+  async function resume(caseId) {
+    if (!Drafts.has(caseId)) return;
+
+    const draft = await Drafts.load(caseId);
+    if (!draft || !activeCase || activeCase.id !== caseId) return;
+
+    Practice.restore(draft, () => {
+      Drafts.drop(caseId);
+      Render.caseGrid();
+    });
   }
 
   /**
@@ -482,13 +636,38 @@ const ScoreModal = (() => {
    * by hand, a typed exchange, or a Live Voice conversation. `submit`
    * below is the one exit that bypasses this: it has already saved the
    * case and calls `forceClose` directly.
+   *
+   * The dialog offers to keep the conversation, and `session` is what
+   * decides whether that offer appears. A case with dots set and
+   * nothing said has no session to resume, so it gets the two-button
+   * dialog it always had rather than a Save button that would write an
+   * empty draft.
+   *
+   * Note what is not saved by any of this: the dots. They are a score,
+   * scores are Close the Case's business, and a draft that could carry
+   * one would be a second path to XP.
    */
   function close() {
-    if (hasUnsavedWork()) {
-      DiscardConfirm.open(forceClose);
+    // Escape is bound at the document, so this runs on the case grid
+    // too, with no case open. `scores` still holds whatever the last
+    // case was given — it is refilled by `open`, not cleared by
+    // `forceClose` — so without this the grid answers Escape with a
+    // dialog about work that was logged ten minutes ago.
+    if (!activeCase) {
       return;
     }
-    forceClose();
+
+    if (!hasUnsavedWork()) {
+      forceClose();
+      return;
+    }
+
+    const caseId = activeCase.id;
+    ExitConfirm.open({
+      session: Practice.snapshot(),
+      save: (snapshot) => Drafts.save(caseId, snapshot),
+      exit: forceClose,
+    });
   }
 
   function hasUnsavedWork() {
@@ -586,6 +765,12 @@ const ScoreModal = (() => {
     };
 
     Storage.saveEntry(entry);
+    // The case has been closed, so the resume point is spent. Leaving it
+    // would put a "saved session" badge on a case that was just logged,
+    // and reopening it would restore the conversation that produced the
+    // score already in the log. Unconditional because dropping a draft
+    // that was never there is a no-op.
+    Drafts.drop(activeCase.id);
     forceClose();
     Render.all();
   }
@@ -594,43 +779,122 @@ const ScoreModal = (() => {
 })();
 
 /* ---------------------------------------------------------- */
-/* 4b. DISCARD CONFIRMATION                                     */
+/* 4b. LEAVING A CASE                                           */
 /* ---------------------------------------------------------- */
 
 /**
- * The one warning between a close attempt and losing a case's progress.
+ * The one decision between a close attempt and losing a case's
+ * progress. Three answers, and they are genuinely three:
+ *
+ *   Save session   keep the conversation, come back to it later
+ *   Discard        leave, keep nothing
+ *   Cancel         stay in the case
  *
  * Shares the reset-confirm modal's markup and glass so it reads as the
  * same kind of decision, not a browser dialog to reflex past. It holds
- * no opinion about what "unsaved" means — ScoreModal decides that and
- * hands over the callback that actually discards and closes.
+ * no opinion about what "unsaved" means or where a session goes —
+ * ScoreModal decides the first and hands over callbacks for the rest.
+ *
+ * Save is the one button here that can fail, and the one that must not
+ * fail quietly: the modal is closing on work that was promised to be
+ * kept. So it waits for the write, says so while it waits, and on
+ * failure stays open with the reason on screen rather than closing and
+ * hoping. Discard and Cancel are instant because neither of them owes
+ * anything to a network.
  */
-const DiscardConfirm = (() => {
-  let onConfirm = null;
+const ExitConfirm = (() => {
+  let plan = null;
 
   function init() {
-    document.getElementById("discard-cancel").addEventListener("click", close);
-    document.getElementById("discard-confirm").addEventListener("click", () => {
-      const run = onConfirm;
+    document.getElementById("exit-cancel").addEventListener("click", close);
+    document.getElementById("exit-save").addEventListener("click", saveThenExit);
+    document.getElementById("exit-discard").addEventListener("click", () => {
+      const exit = plan && plan.exit;
       close();
-      if (run) run();
+      if (exit) exit();
     });
-    document.getElementById("discard-modal-backdrop").addEventListener("click", (e) => {
-      if (e.target.id === "discard-modal-backdrop") close();
+    document.getElementById("exit-modal-backdrop").addEventListener("click", (e) => {
+      // Backdrop is Cancel, not Discard. The safest of the three answers
+      // is the one a stray tap should land on.
+      if (e.target.id === "exit-modal-backdrop") close();
     });
   }
 
-  function open(confirmed) {
-    onConfirm = confirmed;
-    document.getElementById("discard-modal-backdrop").classList.add("open");
+  /**
+   * @param session  what Practice.snapshot() found, or null. Null hides
+   *                 the Save button — there is nothing to save, and a
+   *                 button that writes an empty draft is worse than no
+   *                 button at all.
+   * @param save     async, takes the session, throws with a sentence
+   *                 worth showing.
+   * @param exit     tears the case modal down. Runs after a successful
+   *                 save and after a discard, never after a cancel.
+   */
+  function open({ session, save, exit }) {
+    plan = { session, save, exit };
+    setError("");
+    setSaving(false);
+    document.getElementById("exit-save").hidden = !session;
+    document.getElementById("exit-sub").textContent = subtitleFor(session);
+    document.getElementById("exit-modal-backdrop").classList.add("open");
   }
 
   function close() {
-    document.getElementById("discard-modal-backdrop").classList.remove("open");
-    onConfirm = null;
+    document.getElementById("exit-modal-backdrop").classList.remove("open");
+    plan = null;
   }
 
-  return { init, close };
+  function isOpen() {
+    return document.getElementById("exit-modal-backdrop").classList.contains("open");
+  }
+
+  async function saveThenExit() {
+    if (!plan || !plan.session) return;
+    const { session, save, exit } = plan;
+
+    setError("");
+    setSaving(true);
+    try {
+      await save(session);
+      close();
+      exit();
+    } catch (err) {
+      // Deliberately still open, with the case behind it intact. The
+      // work is only lost if this dialog closes, so the one outcome
+      // worth ruling out is closing on a failed save.
+      setError(err.message);
+      setSaving(false);
+    }
+  }
+
+  /**
+   * What the detective is actually being asked about. A case with a
+   * conversation on it and one with only dots set are two different
+   * losses, and saying "scores and conversation" for both taught
+   * neither.
+   */
+  function subtitleFor(session) {
+    if (!session) {
+      return "The scores you've set haven't been logged. Closing now discards them.";
+    }
+    const mode = session.mode === "voice" ? "Live Voice" : "Text Practice";
+    return `Save this ${mode} session to pick it up later on any device, ` +
+      "or discard it. Either way the dots aren't logged until you close the case.";
+  }
+
+  function setSaving(saving) {
+    const button = document.getElementById("exit-save");
+    button.disabled = saving;
+    button.textContent = saving ? "SAVING…" : "SAVE SESSION";
+    document.getElementById("exit-discard").disabled = saving;
+    document.getElementById("exit-cancel").disabled = saving;
+  }
+
+  function setError(message) {
+    document.getElementById("exit-error").textContent = message;
+  }
+
+  return { init, open, close, isOpen };
 })();
 
 /* ---------------------------------------------------------- */
@@ -667,6 +931,9 @@ const Practice = (() => {
   let transcript = [];
   let waiting = false;
   let live = false;
+  // Set only while a saved session is on screen: what to run if the
+  // detective decides they'd rather start the case cold. See restore.
+  let discardDraft = null;
 
   function init() {
     document.getElementById("practice-modes").addEventListener("click", (e) => {
@@ -699,6 +966,7 @@ const Practice = (() => {
     document.getElementById("voice-toggle").addEventListener("click", toggleVoice);
     document.getElementById("voice-stop").addEventListener("click", () => Voice.interrupt());
     document.getElementById("handoff-copy").addEventListener("click", copyPrompt);
+    document.getElementById("practice-resume-fresh").addEventListener("click", startFresh);
   }
 
   /** Start a fresh session for `question`, or tear everything down with null. */
@@ -709,7 +977,9 @@ const Practice = (() => {
     mode = null;
     transcript = [];
     waiting = false;
+    discardDraft = null;
 
+    document.getElementById("practice-resume").hidden = true;
     document.getElementById("practice-panel").hidden = true;
     document.getElementById("practice-panel").classList.remove("notice-only");
     document.getElementById("chat-log").innerHTML = "";
@@ -1763,7 +2033,122 @@ const Practice = (() => {
     return transcript.length > 0 || Voice.hasHistory();
   }
 
-  return { init, reset, dismiss, hasProgress };
+  /* ---- saving and resuming a session ---- */
+
+  /**
+   * This session as something that could be written down, or null when
+   * there is nothing worth writing.
+   *
+   * Two modes can hold a conversation and only one draft is kept per
+   * case, so this has to choose. The mode on screen wins if it has
+   * anything in it, because that is the one being worked; otherwise
+   * whichever of the two does. Both being full at once is real —
+   * switching modes mid-case leaves the first one intact — and the
+   * alternative to choosing would be a draft that resumes into a mode
+   * the detective wasn't in.
+   *
+   * Scored dots are deliberately absent. They are ScoreModal's, they
+   * already persist through the normal Close the Case path, and a
+   * resume draft that could carry a score would be a second way to
+   * write XP — which is exactly the thing this feature must not become.
+   */
+  function snapshot() {
+    const voice = Voice.history();
+    const held = { text: transcript, voice };
+
+    const preferred = held[mode] && held[mode].length ? mode : null;
+    const fallback = transcript.length ? "text" : voice.length ? "voice" : null;
+    const saved = preferred || fallback;
+
+    return saved ? { mode: saved, messages: held[saved] } : null;
+  }
+
+  /**
+   * Put a saved session back on screen, in the mode it was saved in.
+   *
+   * `choose` does the mode switch exactly as a click would, so the
+   * resumed case is in the same state as one worked from scratch —
+   * nothing here special-cases a resumed session afterwards. It runs
+   * first because the two modes need opposite things from it: text
+   * needs the stage visible before bubbles can be appended to it, and
+   * voice needs `attach` to have created a session for `seed` to fill.
+   *
+   * Blocked access is a real outcome here, not an error. The draft is
+   * still restored and still readable; what a detective at their cap
+   * loses is the ability to add another turn, which is the same thing
+   * they'd lose starting fresh.
+   */
+  function restore(draft, onDiscard) {
+    if (!draft || !draft.messages.length) return false;
+
+    choose(draft.mode);
+
+    if (draft.mode === "text") {
+      transcript = draft.messages.map((m) => ({ role: m.role, content: m.content }));
+      // Cleared first because `choose` seeds an opening hint into an
+      // empty log, and a resumed conversation is not being started.
+      document.getElementById("chat-log").innerHTML = "";
+      transcript.forEach((turn) => say(turn.role, turn.content));
+    } else {
+      Voice.seed(draft.messages);
+    }
+
+    // Whether the conversation is actually back on screen, or only
+    // still on the server. `choose` declines to attach a Live Voice
+    // session when the browser has no speech engine or the cap is
+    // spent, and there is then nothing for `seed` to fill — so the bar
+    // has to say which of the two happened rather than claiming a
+    // resume that didn't take. Nothing is lost either way: the draft is
+    // untouched and opens on a browser that can hold it.
+    const carried = draft.mode === "text" || Voice.attached();
+
+    // Held rather than called: this is the only way back out of a
+    // resumed session, and the bar offering it is on screen for as long
+    // as the resumed session is.
+    discardDraft = onDiscard || null;
+    showResumeBar(draft, carried);
+    return carried;
+  }
+
+  /**
+   * The way out of a resumed session: throw the draft away and work the
+   * case from nothing.
+   *
+   * The discard itself is a callback handed in by whoever restored the
+   * draft. Practice knows what a session is and how to clear one; it
+   * has no business knowing that drafts are stored anywhere, let alone
+   * deleting rows.
+   */
+  function startFresh() {
+    const discard = discardDraft;
+    reset(question);
+    if (discard) discard();
+  }
+
+  /**
+   * The one line that says this conversation was resumed, and offers
+   * not to be.
+   *
+   * Auto-resuming is the right default — it is what "save my session"
+   * promised — but a draft from three weeks ago silently reappearing
+   * under a question you meant to answer cold is a trap without this.
+   * It sits above the practice note rather than replacing it, because
+   * the note is still carrying the budget or a refusal and both facts
+   * are worth having at once.
+   */
+  function showResumeBar(draft, carried) {
+    const bar = document.getElementById("practice-resume");
+    const label = draft.mode === "voice" ? "Live Voice" : "Text Practice";
+    const turns = draft.messages.filter((m) => m.role === "user").length;
+    const answers = `${turns} answer${turns === 1 ? "" : "s"} in`;
+
+    document.getElementById("practice-resume-text").textContent = carried
+      ? `Resumed your saved ${label} session — ${answers}.`
+      : `You have a saved ${label} session here — ${answers}. It'll load when this mode can run.`;
+    bar.hidden = false;
+  }
+
+  return { init, reset, dismiss, hasProgress, snapshot, restore, startFresh };
 })();
 
 /* ---------------------------------------------------------- */
@@ -1838,6 +2223,12 @@ const Login = (() => {
     }
     if (confirm(`Sign out of ${Identity.username()}? That log stays synced to the account — this device goes back to its own.`)) {
       Identity.clear();
+      // Saved sessions belong to the account, not the device, and
+      // unlike the log there is no signed-out slot for them to fall
+      // back to. Cleared rather than re-fetched: there is nobody to
+      // fetch them for, and leaving the badges up would offer to resume
+      // a conversation this device can no longer read.
+      Drafts.clear();
       renderBadge();
       // The badge is not the only thing that just changed meaning. Every
       // panel on the page — rank, XP bar, per-case scores, the log table
@@ -1893,6 +2284,12 @@ const Login = (() => {
       if (await Storage.refresh()) {
         Render.all();
       }
+      // This account's saved sessions, which are nothing to do with
+      // whoever was signed in a moment ago. Not awaited alongside the
+      // log: badges are decoration and must not hold the modal open.
+      Drafts.refresh().then((changed) => {
+        if (changed) Render.caseGrid();
+      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -2286,13 +2683,21 @@ function bootstrap() {
   Views.init();
   Login.init();
   Practice.init();
-  DiscardConfirm.init();
+  ExitConfirm.init();
 
   // Returning detectives sync silently — no modal, no spinner, no wait.
   Storage.refresh().then((changed) => {
     if (changed) Render.all();
     // A refresh can drop an expired session, so the badge is re-read.
     Login.renderBadge();
+  });
+
+  // Which cases have something to come back to. Its own request rather
+  // than part of the log sync: the log is the site's whole state and is
+  // read synchronously by four panels, while this decorates one of them
+  // and can arrive whenever it arrives.
+  Drafts.refresh().then((changed) => {
+    if (changed) Render.caseGrid();
   });
 
   // The stored tier is from whenever this device last signed in, and a
@@ -2316,13 +2721,15 @@ function bootstrap() {
 
   // A live microphone behind a dismissed modal is the one failure worth
   // wiring a keyboard escape for; ScoreModal.close() shuts Practice down.
-  // The discard-confirm dialog gets first refusal when it's the thing on
+  // The leave-the-case dialog gets first refusal when it's the thing on
   // top, then an open menu, so Escape always dismisses whatever the
   // detective is actually looking at rather than reaching past it.
+  // Escape there means Cancel, like the backdrop — it is the answer that
+  // loses nothing.
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    if (document.getElementById("discard-modal-backdrop").classList.contains("open")) {
-      DiscardConfirm.close();
+    if (ExitConfirm.isOpen()) {
+      ExitConfirm.close();
       return;
     }
     if (Practice.dismiss()) return;

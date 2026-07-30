@@ -940,6 +940,45 @@ const Voice = (() => {
   }
 
   /**
+   * The conversation so far, as a copy.
+   *
+   * A copy because the caller saves it, and a saved draft that keeps a
+   * live reference to `session.messages` would go on growing after the
+   * save — so the thing written to the server would be whatever was
+   * said afterwards rather than what was there when the button was
+   * pressed.
+   */
+  function history() {
+    return session ? session.messages.map((m) => ({ role: m.role, content: m.content })) : [];
+  }
+
+  /**
+   * Put a saved conversation back into a freshly attached session.
+   *
+   * Everything Claude needs to carry on is in `messages` — the next
+   * turn ships the whole array, so the interviewer remembers the
+   * resumed session exactly as if it had never been closed.
+   *
+   * The caption is seeded too, and from the last assistant turn
+   * specifically. This mode has no chat log: the orb's caption is the
+   * only surface a spoken conversation leaves behind, and resuming into
+   * a blank one reads as a session that lost its history rather than
+   * one that kept it. `aloud` is set alongside it because that is what
+   * `interrupt` writes into the transcript, and a resumed turn cut
+   * short must not record a sentence from before the save as if it had
+   * just been spoken.
+   */
+  function seed(messages) {
+    if (!session || !Array.isArray(messages)) return;
+    session.messages = messages.map((m) => ({ role: m.role, content: m.content }));
+
+    const last = [...session.messages].reverse().find((m) => m.role === "assistant");
+    session.caption = last ? last.content : "";
+    session.aloud = "";
+    if (last) session.on.said(last.content);
+  }
+
+  /**
    * Open a conversation about one case. Does not touch the microphone —
    * typed asides work immediately, and `openMic` adds speech on top.
    *
@@ -1451,7 +1490,7 @@ const Voice = (() => {
   }
 
   return {
-    supported, attached, hasHistory, attach, openMic, closeMic, stop, submit,
+    supported, attached, hasHistory, history, seed, attach, openMic, closeMic, stop, submit,
     listening, busy, interrupt,
   };
 })();

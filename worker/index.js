@@ -9,6 +9,7 @@
  *   3. Access       - who may spend money on AI coaching, and how much
  *   4. Detectives   - account rows + session tokens
  *   5. CaseLog      - XP entries, read and merge
+ *   5b. Drafts      - unfinished practice sessions, saved to resume
  *   6. Pricing      - Anthropic token counts -> US dollars
  *   7. Coach        - the only place that holds the Anthropic API key
  *   8. Admin        - mint invite codes, read and adjust their caps
@@ -33,6 +34,16 @@
 const API_PREFIX = "/api/";
 const MAX_USERNAME = 32;
 const MAX_PUSH_ENTRIES = 500;
+
+// A saved draft is one practice session, so it is bounded by what one
+// session can plausibly be. MAX_DRAFT_TURNS sits above Coach's own
+// MAX_TURNS (24) because a draft records everything that was said,
+// including the turns Coach itself would have trimmed off the front of
+// the next request. MAX_DRAFT_CHARS matches Coach's MAX_CHARS: content
+// longer than that is already truncated before the model ever sees it,
+// so storing more would preserve text that can no longer affect a reply.
+const MAX_DRAFT_TURNS = 40;
+const MAX_DRAFT_CHARS = 4000;
 
 /* ---------------------------------------------------------- */
 /* 1. RESPONSES                                                */
@@ -548,6 +559,157 @@ const CaseLog = (() => {
   }
 
   return { read, merge, clear };
+})();
+
+/* ---------------------------------------------------------- */
+/* 5b. DRAFTS                                                  */
+/* ---------------------------------------------------------- */
+
+/**
+ * A practice session that was left rather than finished.
+ *
+ * The neighbouring module is the one to compare this against. CaseLog
+ * stores what a case was worth; this stores what was said while working
+ * it. They are deliberately unaware of each other — saving a draft
+ * writes no XP, reading one grants none, and deleting every row in this
+ * table would cost a detective nothing but their place in a
+ * conversation. That separation is the feature: a resume point must
+ * never be able to inflate a score, and a scored attempt must never be
+ * blocked by a draft that happens to exist.
+ *
+ * One row per detective per case, enforced by the primary key. `save`
+ * is an UPSERT, so saving twice overwrites rather than accumulating —
+ * which is why nothing here needs a draft id, a list-per-case, or a
+ * rule about which of several drafts is the current one.
+ *
+ * The transcript is stored and returned as opaque JSON. This module
+ * checks its shape — an array of { role, content } within bounds — and
+ * then declines to look inside it. The browser owns what a turn means.
+ */
+const Drafts = (() => {
+  const MODES = ["text", "voice"];
+
+  /**
+   * Every case with a draft, without the transcripts.
+   *
+   * The case grid needs to know *which* cases have something saved, and
+   * nothing more; sending forty turns per case to draw a badge would be
+   * the whole feature's data over the wire to render a word.
+   */
+  async function list(db, detectiveId) {
+    const result = await db
+      .prepare(
+        `SELECT case_id, mode, updated_at FROM session_drafts
+         WHERE detective_id = ? ORDER BY updated_at DESC`
+      )
+      .bind(detectiveId)
+      .all();
+
+    return (result.results || []).map((row) => ({
+      caseId: row.case_id,
+      mode: row.mode,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  /** One draft in full, or null. */
+  async function read(db, detectiveId, caseId) {
+    const row = await db
+      .prepare(
+        `SELECT case_id, mode, transcript, updated_at FROM session_drafts
+         WHERE detective_id = ? AND case_id = ?`
+      )
+      .bind(detectiveId, caseId)
+      .first();
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      caseId: row.case_id,
+      mode: row.mode,
+      messages: parse(row.transcript),
+      updatedAt: row.updated_at,
+    };
+  }
+
+  /**
+   * Write the draft for one case, replacing whatever was there.
+   *
+   * Returns the stored draft, or null when the request didn't describe
+   * one. Rejecting rather than silently storing a repaired version is
+   * the right call here even though this is a resume point and not
+   * money: a draft that comes back subtly different from what was sent
+   * would surface as a conversation that lost a turn, and the only
+   * place that could be diagnosed is the one place nobody looks.
+   */
+  async function save(db, detectiveId, caseId, mode, messages) {
+    if (!MODES.includes(mode) || !Number.isInteger(caseId) || !Array.isArray(messages)) {
+      return null;
+    }
+
+    const clean = messages.filter(isTurn).slice(-MAX_DRAFT_TURNS).map(toTurn);
+    if (clean.length === 0) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    await db
+      .prepare(
+        `INSERT INTO session_drafts (detective_id, case_id, mode, transcript, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (detective_id, case_id)
+         DO UPDATE SET mode = excluded.mode,
+                       transcript = excluded.transcript,
+                       updated_at = excluded.updated_at`
+      )
+      .bind(detectiveId, caseId, mode, JSON.stringify(clean), now)
+      .run();
+
+    return { caseId, mode, messages: clean, updatedAt: now };
+  }
+
+  /** Drop the draft for one case. Silent when there wasn't one. */
+  async function remove(db, detectiveId, caseId) {
+    await db
+      .prepare("DELETE FROM session_drafts WHERE detective_id = ? AND case_id = ?")
+      .bind(detectiveId, caseId)
+      .run();
+  }
+
+  function isTurn(turn) {
+    return (
+      turn &&
+      (turn.role === "user" || turn.role === "assistant") &&
+      typeof turn.content === "string" &&
+      turn.content.trim().length > 0
+    );
+  }
+
+  function toTurn(turn) {
+    return { role: turn.role, content: turn.content.slice(0, MAX_DRAFT_CHARS) };
+  }
+
+  /**
+   * Read a stored transcript back.
+   *
+   * Empty rather than throwing on a row that won't parse. Everything
+   * written here went through `save`, so this should be impossible —
+   * and if it ever isn't, one unreadable draft should cost that case
+   * its resume point, not take the case grid down with it.
+   */
+  function parse(transcript) {
+    try {
+      const messages = JSON.parse(transcript);
+      return Array.isArray(messages) ? messages.filter(isTurn) : [];
+    } catch (err) {
+      console.error("Unreadable draft transcript:", err && err.message);
+      return [];
+    }
+  }
+
+  return { list, read, save, remove };
 })();
 
 /* ---------------------------------------------------------- */
@@ -1228,7 +1390,22 @@ const Admin = (() => {
  */
 const Health = (() => {
   /** Tables the Worker cannot function without. */
-  const REQUIRED_TABLES = ["detectives", "sessions", "case_log", "invite_codes"];
+  const REQUIRED_TABLES = ["detectives", "sessions", "case_log", "invite_codes", "session_drafts"];
+
+  /**
+   * The command that creates each table, for a database that is missing
+   * some but not all of them.
+   *
+   * Keyed by table rather than reported as one blanket "run the
+   * migrations", because the two migrations are not interchangeable:
+   * 0001 fails loudly on a second run by design, so telling someone to
+   * apply both when they only need the second hands them an error that
+   * looks like a failure and isn't.
+   */
+  const CREATED_BY = {
+    invite_codes: "npm run db:migrate:remote",
+    session_drafts: "npm run db:migrate:drafts:remote",
+  };
 
   async function read(env) {
     const report = {
@@ -1251,8 +1428,13 @@ const Health = (() => {
     }
 
     try {
+      // Placeholders counted from the list rather than written out.
+      // They were written out once, and adding a fifth required table
+      // left four of them — SQLite bound the first four names, found
+      // them all, and reported the fifth missing forever.
+      const slots = REQUIRED_TABLES.map(() => "?").join(", ");
       const found = await env.DB.prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?)"
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${slots})`
       )
         .bind(...REQUIRED_TABLES)
         .all();
@@ -1264,18 +1446,31 @@ const Health = (() => {
 
       if (!report.schema_ready) {
         // A brand new database is missing everything; one that predates
-        // invite codes is missing exactly one table. Same symptom, two
-        // different commands, so the hint says which.
+        // a feature is missing exactly the tables that feature added.
+        // Same symptom, different commands, so the hint says which.
         report.hint =
           report.missing_tables.length === REQUIRED_TABLES.length
             ? "Database is empty. Run: npm run db:init:remote"
-            : "Database predates a schema change. Run: npm run db:migrate:remote";
+            : `Database predates a schema change. Run: ${commandsFor(report.missing_tables)}`;
       }
     } catch (err) {
       report.hint = `Database unreachable: ${err.message}`;
     }
 
     return report;
+  }
+
+  /**
+   * The migrations that would create these tables, in order, deduped.
+   *
+   * A table with no entry in CREATED_BY predates the migrations
+   * directory entirely, which means this database is old enough that
+   * re-running schema.sql is the honest advice — every statement in it
+   * is IF NOT EXISTS, so it costs nothing on the tables already there.
+   */
+  function commandsFor(missing) {
+    const commands = missing.map((table) => CREATED_BY[table] || "npm run db:init:remote");
+    return [...new Set(commands)].join(" && ");
   }
 
   return { read };
@@ -1343,6 +1538,43 @@ async function handleApi(request, env, ctx, path) {
   if (path === "/api/log" && request.method === "DELETE") {
     await CaseLog.clear(env.DB, detective.id);
     return Responses.json({ log: [] });
+  }
+
+  // Saved practice sessions. Free of tier checks on purpose: a draft is
+  // text this account already produced, and re-reading your own words
+  // costs nothing at api.anthropic.com. An invite code that has spent
+  // its cap can still save and resume; it simply can't be replied to.
+  if (path === "/api/drafts" && request.method === "GET") {
+    return Responses.json({ drafts: await Drafts.list(env.DB, detective.id) });
+  }
+
+  if (path.startsWith("/api/drafts/")) {
+    const caseId = Number(path.slice("/api/drafts/".length));
+    if (!Number.isInteger(caseId)) {
+      return Responses.fail("No such case file.", 404);
+    }
+
+    if (request.method === "GET") {
+      return Responses.json({ draft: await Drafts.read(env.DB, detective.id, caseId) });
+    }
+
+    // PUT, not POST. Saving a session twice has to land on the same row
+    // with the same result, and the method should say so — the client
+    // retries this on a flaky connection and must not be able to leave
+    // two half-drafts behind.
+    if (request.method === "PUT") {
+      const body = await readJson(request);
+      const draft = await Drafts.save(env.DB, detective.id, caseId, body.mode, body.messages);
+      if (!draft) {
+        return Responses.fail("That session had nothing in it to save.", 400);
+      }
+      return Responses.json({ draft });
+    }
+
+    if (request.method === "DELETE") {
+      await Drafts.remove(env.DB, detective.id, caseId);
+      return Responses.json({ draft: null });
+    }
   }
 
   // The only route that spends money, and the only one that is tiered.
