@@ -852,6 +852,11 @@ main {
   position: fixed;
   inset: 0;
   background: rgba(6, 5, 13, 0.75);
+  /* Unprefixed alone renders unblurred on iPad: iOS runs every browser,
+     Chrome included, on WebKit under the hood, and WebKit still requires
+     the -webkit- form. Order matters — unprefixed last so a browser that
+     understands both keeps it. */
+  -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
   display: none;
   align-items: center;
@@ -861,6 +866,16 @@ main {
 }
 
 .modal-backdrop.open { display: flex; }
+
+/* Set on <body> while any modal-backdrop is open — see BodyScroll in
+   app.js for why. `top` is pushed as an inline style alongside this
+   class, pinning the page at its current scroll offset. */
+body.scroll-locked {
+  position: fixed;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+}
 
 .modal {
   background:
@@ -884,6 +899,12 @@ main {
 .modal-scroll {
   max-height: 85vh;
   overflow-y: auto;
+  /* Stops a scroll that hits the top or bottom of this panel from
+     chaining into the page behind it. Belt-and-suspenders alongside
+     BodyScroll: real on Chromium, a no-op on WebKit, which does not
+     support overscroll-behavior and is why BodyScroll carries the fix
+     on iPad regardless. */
+  overscroll-behavior: contain;
   padding: 32px;
 }
 

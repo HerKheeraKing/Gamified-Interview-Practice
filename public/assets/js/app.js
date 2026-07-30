@@ -401,6 +401,46 @@ const Render = (() => {
 /* 4. MODAL / SCORING FLOW                                     */
 /* ---------------------------------------------------------- */
 
+/**
+ * Freezes the page behind an open modal.
+ *
+ * iOS rubber-bands the document itself, not whatever scroll container
+ * is on top of it — a drag inside `.modal-scroll` still reaches the
+ * page underneath, and overscrolling past the top or bottom of that
+ * page exposes blank space beyond its content. `overflow: hidden` on
+ * body does not stop this on iOS; the body has to leave normal flow.
+ *
+ * `position: fixed` does that, but it also resets scroll to 0, so the
+ * page would jump under the detective the instant a modal opens.
+ * Pinning body at `top: -scrollY` cancels the jump; `unlock()` reverses
+ * it and restores the exact scroll position.
+ *
+ * Three call sites (case, login, reset) each lock and unlock
+ * independently. `depth` collapses that to one real lock so a second
+ * modal opening over a first doesn't restore scroll early when only
+ * the inner one closes.
+ */
+const BodyScroll = (() => {
+  let depth = 0;
+  let savedY = 0;
+
+  function lock() {
+    if (depth++ > 0) return;
+    savedY = window.scrollY;
+    document.body.style.top = `-${savedY}px`;
+    document.body.classList.add("scroll-locked");
+  }
+
+  function unlock() {
+    if (depth === 0 || --depth > 0) return;
+    document.body.classList.remove("scroll-locked");
+    document.body.style.top = "";
+    window.scrollTo(0, savedY);
+  }
+
+  return { lock, unlock };
+})();
+
 const ScoreModal = (() => {
   let activeCase = null;
   const scores = {};
@@ -420,10 +460,12 @@ const ScoreModal = (() => {
     Practice.reset(activeCase.question);
 
     document.getElementById("case-modal-backdrop").classList.add("open");
+    BodyScroll.lock();
   }
 
   function close() {
     document.getElementById("case-modal-backdrop").classList.remove("open");
+    BodyScroll.unlock();
     Practice.reset(null);
     activeCase = null;
   }
@@ -1729,11 +1771,13 @@ const Login = (() => {
     // moment it was needed.
     Minting.collapse();
     document.getElementById("login-modal-backdrop").classList.add("open");
+    BodyScroll.lock();
     input.focus();
   }
 
   function close() {
     document.getElementById("login-modal-backdrop").classList.remove("open");
+    BodyScroll.unlock();
     Minting.collapse();
   }
 
@@ -2197,6 +2241,7 @@ function bootstrap() {
   // on the page, so dismissing it takes noticing it first.
   document.getElementById("reset-btn").addEventListener("click", () => {
     document.getElementById("reset-modal-backdrop").classList.add("open");
+    BodyScroll.lock();
   });
   document.getElementById("reset-cancel").addEventListener("click", closeResetModal);
   document.getElementById("reset-modal-backdrop").addEventListener("click", (e) => {
@@ -2210,6 +2255,7 @@ function bootstrap() {
 
   function closeResetModal() {
     document.getElementById("reset-modal-backdrop").classList.remove("open");
+    BodyScroll.unlock();
   }
 }
 
