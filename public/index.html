@@ -2,7 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- viewport-fit=cover is what makes env(safe-area-inset-*) report real
+     numbers. Without it iOS returns zero for all four and every max()
+     guard in the stylesheet silently resolves to its fallback — which
+     is what left the modal's last button under the home indicator and
+     made the header's safe-area padding do nothing outside standalone
+     mode. It also lets the page paint into the inset regions, so every
+     edge that content can reach carries its own guard: .site-header on
+     top, .site-footer on the bottom, .modal-backdrop and .modal-scroll
+     around the modal. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>The Interview Case Files</title>
 <meta name="description" content="Every interview is a case. Every question is a lead. A gamified field manual for AWS and Python interview prep — work the question like a detective, earn XP, close the case." />
 

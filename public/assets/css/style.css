@@ -1118,6 +1118,10 @@ body.scroll-locked {
   z-index: 1;
   text-align: center;
   padding: 30px;
+  /* The bottom counterpart to .site-header's top guard. This is the
+     last element on the page, so with viewport-fit=cover it is the one
+     that would otherwise end up under the home indicator. */
+  padding-bottom: max(30px, env(safe-area-inset-bottom));
   color: var(--text-faint);
   font-size: 12px;
 }
