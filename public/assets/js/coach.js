@@ -898,10 +898,11 @@ const Voice = (() => {
    *
    * Shorter than the original 5s: testing showed that pause tolerable
    * for a STAR story was making the mic feel unresponsive for shorter
-   * answers. 2s still clears a normal breath or word-finding gap
-   * without leaving the user waiting on a turn that has clearly ended.
+   * answers. Tuned again from 2s to 1.5s: still clears a normal breath
+   * or word-finding gap without leaving the user waiting on a turn
+   * that has clearly ended.
    */
-  const SILENCE_MS = 2000;
+  const SILENCE_MS = 1500;
   const SENTENCE_END = /([.!?])\s/;
 
   /**
