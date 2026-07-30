@@ -893,6 +893,11 @@ main {
   justify-content: center;
   z-index: 50;
   padding: 20px;
+  /* The home indicator and Safari's bottom edge both live inside this
+     box on an iPad, and a flat 20px puts the modal's last button under
+     them. max() keeps the plain 20px everywhere the insets are zero. */
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+  padding-top: max(20px, env(safe-area-inset-top));
 }
 
 .modal-backdrop.open { display: flex; }
@@ -907,6 +912,26 @@ body.scroll-locked {
   overflow: hidden;
 }
 
+/* ONE OWNER OF THE HEIGHT.
+ *
+ * This element decides how tall the modal may be. `.modal-scroll`
+ * below decides nothing — it fills whatever it is given.
+ *
+ * It used to be written twice: both carried `max-height: 85vh`, which
+ * looked equivalent and is not. A `max-height` in viewport units is
+ * resolved against the viewport, not against the parent, so the inner
+ * panel was sizing itself from the screen while sitting inside a box
+ * sized from the screen *minus* the backdrop's padding and the safe
+ * area. The inner box therefore came out taller than the box holding
+ * it, `overflow: hidden` here quietly clipped the difference, and the
+ * scroll container's last stretch — the Close the Case button and the
+ * padding under it — ended up in a strip that could be scrolled to but
+ * not seen. On screen that reads as content stopping short with dead
+ * space beneath it, which is exactly what it was.
+ *
+ * Flex column is what makes the child fill rather than re-derive.
+ * `min-height: 0` on the child is the other half; see there.
+ */
 .modal {
   background:
     linear-gradient(135deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.02) 40%, rgba(125,211,252,0.04) 100%),
@@ -917,7 +942,14 @@ body.scroll-locked {
   border-radius: 20px;
   max-width: 520px;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  /* vh first as the fallback, dvh second so a browser that understands
+     both keeps it. They are the same number on a desktop and on an
+     iPad whose toolbars never retract; where they differ, dvh is the
+     one measuring the space actually on screen. */
   max-height: 85vh;
+  max-height: 85dvh;
   overflow: hidden;
   position: relative;
   box-shadow:
@@ -926,8 +958,17 @@ body.scroll-locked {
     0 20px 50px rgba(0,0,0,0.4);
 }
 
+/* Fills the modal, never taller. No height of its own on purpose —
+   see the note above.
+ *
+ * `min-height: 0` is load-bearing, not tidying. A flex item's default
+ * `min-height: auto` refuses to shrink below its content, so without
+ * it this box would grow to the full height of the scorecard and take
+ * the modal past its cap — the overflow would move back up to `.modal`,
+ * where it is hidden rather than scrolled, and the bottom of the case
+ * would be unreachable again by a different route. */
 .modal-scroll {
-  max-height: 85vh;
+  min-height: 0;
   overflow-y: auto;
   /* Stops a scroll that hits the top or bottom of this panel from
      chaining into the page behind it. Belt-and-suspenders alongside
@@ -936,6 +977,11 @@ body.scroll-locked {
      on iPad regardless. */
   overscroll-behavior: contain;
   padding: 32px;
+  /* The scroll container's own bottom edge. The backdrop's inset keeps
+     the modal clear of the home indicator; this keeps the last button
+     clear of the modal's rounded corner when the content is long
+     enough to actually scroll. */
+  padding-bottom: max(32px, env(safe-area-inset-bottom));
 }
 
 .modal-close {
@@ -1138,12 +1184,21 @@ body.scroll-locked {
  * confirmation look like nothing had happened at all. Same element,
  * so overriding `overflow` here is the whole fix.
  */
+/* Back to a block box, deliberately. `.modal` is a flex column so its
+   inner scroller can fill it; this modal has no inner scroller — it is
+   its own — and leaving it flex would turn every paragraph and button
+   row into a flex item, ending sibling margin collapsing and shifting
+   the spacing of the login, leave-the-case and reset dialogs for no
+   gain. It scrolls itself, so it keeps its own cap. */
 .login-modal {
+  display: block;
   max-width: 440px;
   padding: 36px 32px 30px;
   text-align: center;
   max-height: 85vh;
+  max-height: 85dvh;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .login-title {
