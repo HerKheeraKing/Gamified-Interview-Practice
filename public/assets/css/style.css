@@ -776,12 +776,18 @@ main {
  * read out by a screen reader as punctuation before the label it is
  * decorating.
  *
- * This is the one part that is genuinely a light source rather than a
- * lit surface, so it carries the full three-step falloff at its
- * shortest and hottest: the glyph itself is core-white — not amber —
- * with the hue arriving in the bloom around it and the lilac only in
- * the outermost layer. Painting the glyph amber and glowing amber
- * around it is what makes a star look like a sticker of a star.
+ * The glyph is amber, not core-white. White is what a light source
+ * physically does at its centre, and it was wrong here anyway: at 10px
+ * a white star on a gold pill is a hole punched in the badge rather
+ * than the brightest part of it. The badge is small enough that the eye
+ * reads the shape before the falloff, and a shape that disagrees with
+ * everything around it reads as a mistake. Correctness lost to the
+ * thing actually being looked at.
+ *
+ * So the hue stays in the glyph and the *glow* keeps the three steps —
+ * a tight warm-light layer for the hot centre, amber through the
+ * middle, lilac at the edge. That is where the light-source quality
+ * survives at this size.
  *
  * A pixel larger than the text beside it, because at 9px a star is
  * mostly its own glow and that pixel is what keeps five points instead
@@ -790,9 +796,9 @@ main {
   content: "\2605";
   font-size: 10px;
   line-height: 1;
-  color: rgb(var(--flare-core));
+  color: rgb(var(--flare-warm));
   text-shadow:
-    0 0 3px rgba(var(--flare-core), 0.95),
+    0 0 3px rgba(var(--flare-core), 0.55),
     0 0 7px rgba(var(--flare-warm), 0.90),
     0 0 14px rgba(var(--flare-halo), 0.60);
 }
