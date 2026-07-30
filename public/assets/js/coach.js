@@ -896,14 +896,12 @@ const Voice = (() => {
   /**
    * How long a pause has to run before the turn is treated as over.
    *
-   * Deliberately far longer than a chat app would use. This is someone
-   * assembling an interview answer out loud, and the pause while they
-   * decide how to phrase the result of a STAR story is easily several
-   * seconds. Cutting in at a conversational beat teaches them to rush,
-   * which is the opposite of the point. A turn that ends late costs a
-   * few seconds; a turn that ends early costs the answer.
+   * Shorter than the original 5s: testing showed that pause tolerable
+   * for a STAR story was making the mic feel unresponsive for shorter
+   * answers. 2s still clears a normal breath or word-finding gap
+   * without leaving the user waiting on a turn that has clearly ended.
    */
-  const SILENCE_MS = 5000;
+  const SILENCE_MS = 2000;
   const SENTENCE_END = /([.!?])\s/;
 
   /**
