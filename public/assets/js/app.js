@@ -2191,12 +2191,26 @@ function bootstrap() {
     ScoreModal.close();
   });
 
+  // A raw confirm() ran the same check but looked like the browser
+  // rather than the case file, and habit clicks past those without
+  // reading them. This one is a modal like every other decision point
+  // on the page, so dismissing it takes noticing it first.
   document.getElementById("reset-btn").addEventListener("click", () => {
-    if (confirm("Reset all XP and case history? This can't be undone.")) {
-      Storage.clearLog();
-      Render.all();
-    }
+    document.getElementById("reset-modal-backdrop").classList.add("open");
   });
+  document.getElementById("reset-cancel").addEventListener("click", closeResetModal);
+  document.getElementById("reset-modal-backdrop").addEventListener("click", (e) => {
+    if (e.target.id === "reset-modal-backdrop") closeResetModal();
+  });
+  document.getElementById("reset-confirm").addEventListener("click", () => {
+    Storage.clearLog();
+    Render.all();
+    closeResetModal();
+  });
+
+  function closeResetModal() {
+    document.getElementById("reset-modal-backdrop").classList.remove("open");
+  }
 }
 
 // Guard against sandboxed/iframe environments where the document may

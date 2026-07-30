@@ -549,6 +549,27 @@
     </div>
   </div>
 
+  <!-- RESET CONFIRM MODAL
+       A raw confirm() said the same thing but looked like the browser,
+       not the case file — easy to dismiss on reflex. This one shares the
+       login modal's glass and sizing so refusing to read it takes an
+       actual decision, not a habit. -->
+  <div id="reset-modal-backdrop" class="modal-backdrop">
+    <div class="modal login-modal">
+      <h3 class="login-title">Burn the <em>Case File</em>?</h3>
+      <p class="login-sub">
+        This permanently deletes every case log, all XP, and your rank
+        progress. There is no undo.
+      </p>
+      <div class="login-actions">
+        <button type="button" class="pill-btn" id="reset-cancel">CANCEL</button>
+        <button type="button" class="pill-btn pill-btn-danger" id="reset-confirm">
+          RESET EVERYTHING
+        </button>
+      </div>
+    </div>
+  </div>
+
   <footer class="site-footer">
     © 2026 Kheera's Case Method — Interview Case Files
   </footer>
