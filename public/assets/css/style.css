@@ -147,13 +147,39 @@ body::-webkit-scrollbar-track,
   margin: 8px 0;
 }
 
+/* No min-height here, and that absence is the fix rather than an
+ * omission.
+ *
+ * This carried `min-height: 100vh`, which reserved a full viewport of
+ * height whether the page had that much to show or not. A round with
+ * four cases fills maybe half a screen, and the rest was empty
+ * scrollable page below the footer — space held open for content that
+ * does not exist.
+ *
+ * The reason it looked necessary is the background, and the background
+ * never needed it. A background set on `html` is propagated to the
+ * canvas, and the canvas is painted over the whole viewport no matter
+ * how short the document is. So the colour was already guaranteed; the
+ * min-height was buying nothing and costing a screenful.
+ *
+ * Worst on iPad, which is where it was noticed. `vh` resolves against
+ * the large viewport — the one with the browser toolbars retracted —
+ * so on a device whose toolbars are always showing, `100vh` is taller
+ * than the screen and the reserved block is bigger than a screenful.
+ * viewport-fit=cover widens the gap again by folding the safe-area
+ * regions into the same measurement.
+ *
+ * If a floor is ever wanted back — to hold a short page's footer down
+ * at the bottom of the screen — it belongs on `main` as `100dvh` minus
+ * the header and footer, not as `100vh` on the whole document. `dvh`
+ * measures what is on screen; `vh` measures what could be.
+ */
 html, body {
   margin: 0;
   padding: 0;
   background: var(--bg-void);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  min-height: 100vh;
 }
 
 .bg-glow {
