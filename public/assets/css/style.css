@@ -677,10 +677,9 @@ main {
  * positioned badge would overlap the question on the narrowest grid
  * column, which is where the text is already tightest.
  *
- * Cyan, and the only cyan on an unpracticed card. The score badges below
- * are white and mean "what this was worth"; this means "there is
- * something here to come back to", which is a different kind of fact and
- * should not be mistaken for a score at a glance. */
+ * The score badges below are white and mean "what this was worth"; this
+ * means "there is something here to come back to", which is a different
+ * kind of fact and should not be mistaken for a score at a glance. */
 .case-head {
   display: flex;
   align-items: baseline;
@@ -688,16 +687,80 @@ main {
   gap: 10px;
 }
 
+/* Gold, and the only gold anywhere on the site.
+ *
+ * It was cyan, which was the mistake. Every glass edge, focus ring,
+ * case number and scrollbar on this page is already some value of cyan,
+ * so a cyan badge was the one thing on the card that most needed to be
+ * noticed wearing the colour of everything around it. It read as part
+ * of the panel rather than as a mark on it.
+ *
+ * Warm is doing the work here, not bright. On a background this cold —
+ * near-black navy with cyan bloom — a warm hue is separated from its
+ * surroundings by temperature as well as luminance, which survives
+ * being glanced at, scaled down, and seen on a screen in daylight.
+ * Turning up the cyan would only have made it a louder member of the
+ * same family.
+ *
+ * The tokens are declared here rather than in :root deliberately. This
+ * is a one-element accent and it should stay that way; a --gold sitting
+ * beside --accent in the token block is an invitation to spend it
+ * somewhere else, and the second thing wearing it is the moment it
+ * stops meaning "saved session".
+ */
 .case-draft {
+  --gold: 255, 193, 94;
+  --gold-lit: 255, 233, 186;
+
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 9px;
   letter-spacing: 1px;
   text-transform: uppercase;
-  color: var(--accent-soft);
-  border: 1px solid rgba(165, 230, 255, 0.28);
+  color: rgb(var(--gold-lit));
+  border: 1px solid rgba(var(--gold), 0.42);
   border-radius: 999px;
-  padding: 3px 9px;
-  background: rgba(125, 211, 252, 0.07);
+  padding: 3px 10px;
+
+  /* Same two-layer recipe as every other glass surface here — a raking
+     highlight over a tinted base — so the badge reads as lit from the
+     same direction as the card it sits on. A flat fill would have been
+     a sticker on the glass rather than part of it. */
+  background:
+    linear-gradient(135deg, rgba(var(--gold-lit), 0.20) 0%, rgba(var(--gold), 0.06) 55%, rgba(var(--gold), 0.14) 100%),
+    rgba(48, 34, 14, 0.45);
+
+  /* The radiant edge, in three parts: a bloom that leaves the border and
+     falls off, a tighter one that keeps the shape legible at 9px, and an
+     inner top highlight so the pill looks convex rather than printed.
+     Kept under the card's own 0 0 30px bloom — a badge that out-glows
+     the panel holding it stops looking like it belongs to it. */
+  box-shadow:
+    0 0 16px rgba(var(--gold), 0.26),
+    0 0 5px rgba(var(--gold), 0.30),
+    inset 0 1px 0 rgba(var(--gold-lit), 0.34);
+
+  text-shadow: 0 0 9px rgba(var(--gold), 0.55);
+}
+
+/* The star, as a pseudo-element rather than markup.
+ *
+ * It is decoration and belongs in the stylesheet: the badge already
+ * says "saved session" in words, and a character in the DOM would be
+ * read out by a screen reader as punctuation before the label it is
+ * decorating.
+ *
+ * A shade brighter and a size larger than the text it sits beside,
+ * because at 9px a star is mostly its own glow — the extra pixel is
+ * what keeps five points instead of a dot. */
+.case-draft::before {
+  content: "\2605";
+  font-size: 10px;
+  line-height: 1;
+  color: rgb(var(--gold-lit));
+  text-shadow: 0 0 8px rgba(var(--gold), 0.85);
 }
 
 .case-score-empty {
